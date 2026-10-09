@@ -78,7 +78,14 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
           register: register ? true : nil,
           events: Array(prepared[start..<min(start + 500, prepared.count)])))
       request.timeout = timeout
+      let chunk = prepared[start..<min(start + 500, prepared.count)]
+      for customer in Set(chunk.map(\.customer)) {
+        await core.writes.record(customer, at: Hooks.current.now())
+      }
       let answer: UsageBatchResult = try await core.call(request)
+      for customer in Set(chunk.map(\.customer)) {
+        await core.writes.record(customer, at: Hooks.current.now())
+      }
       results += answer.results.map {
         UsageEventResult(
           index: start + $0.index, outcome: $0.outcome, id: $0.id, late: $0.late, error: $0.error)

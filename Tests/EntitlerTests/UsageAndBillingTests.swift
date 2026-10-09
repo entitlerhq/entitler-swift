@@ -259,6 +259,22 @@ import Testing
     #expect(api.last.path == "/usage/events")
   }
 
+  @Test func batchesForceRevalidationForTheirCustomers() async throws {
+    let api = FakeAPI { request in
+      request.method == "GET"
+        ? .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+        : .json(#"{"results":[],"recorded":0,"duplicates":0,"errors":0}"#)
+    }
+    let server = try api.server()
+    try await api.run {
+      _ = try await server.customer("u").check("sso")
+      api.advance(1)
+      _ = try await server.recordUsageBatch([UsageBatchEvent(customer: "u", feature: "ai_credits")])
+      _ = try await server.customer("u").check("sso")
+    }
+    #expect(api.count == 3)
+  }
+
   @Test func batchErrorsDecode() async throws {
     let api = FakeAPI { _ in
       .json(
