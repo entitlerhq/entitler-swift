@@ -10,3 +10,4 @@ DerivedData/
 /examples/doc-snippets
 /examples/Package.resolved
 Package.resolved
+*.profraw
