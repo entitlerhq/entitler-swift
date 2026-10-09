@@ -18,8 +18,10 @@ enum Golden {
   }
 }
 
-func featureList(_ features: String, release: String = "2", change: String = "null") -> FeatureList {
-  let json = #"{"environment":{"id":"e","name":"development","kind":"test"},"track":{"id":"t","name":"All customers"},"release":\#(release),"change":\#(change),"features":[\#(features)]}"#
+func featureList(_ features: String, release: String = "2", change: String = "null") -> FeatureList
+{
+  let json =
+    #"{"environment":{"id":"e","name":"development","kind":"test"},"track":{"id":"t","name":"All customers"},"release":\#(release),"change":\#(change),"features":[\#(features)]}"#
   return try! JSON.decoder().decode(FeatureList.self, from: Data(json.utf8))
 }
 
@@ -28,21 +30,44 @@ func feature(
   archived: Bool = false, includes: [String] = []
 ) -> String {
   let includes = includes.map { "\"\($0)\"" }.joined(separator: ",")
-  return #"{"id":"\#(key)","key":"\#(key)","name":"\#(name ?? key)","type":"\#(type)","description":"\#(description)","unit":"\#(unit)","resetEvery":null,"archived":\#(archived),"includes":[\#(includes)]}"#
+  return
+    #"{"id":"\#(key)","key":"\#(key)","name":"\#(name ?? key)","type":"\#(type)","description":"\#(description)","unit":"\#(unit)","resetEvery":null,"archived":\#(archived),"includes":[\#(includes)]}"#
 }
 
 let sampleCatalogue = [
-  feature("team_essentials", "group", name: "Team essentials", description: "Everything a team needs, as one unit.", includes: ["collaboration", "support_extras"]),
-  feature("ai_credits", "metered", name: "AI credits", description: "Spent on AI actions each month.", unit: "credits"),
-  feature("collaboration", "group", name: "Collaboration", description: "Working with other people.", includes: ["team_seats", "shared_folders"]),
-  feature("export_pdf", "boolean", name: "Export to PDF", description: "Download any document as a PDF."),
-  feature("priority_support", "boolean", name: "Priority support", description: "Jump the support queue."),
-  feature("shared_folders", "boolean", name: "Shared folders", description: "Folders the whole workspace can see."),
-  feature("sso", "boolean", name: "Single sign-on", description: "Log in through the customer's identity provider."),
-  feature("support_contacts", "config", name: "Support contacts", description: "People who can open tickets.", unit: "contacts"),
-  feature("support_extras", "group", name: "Support extras", description: "Priority queue plus a reply-time promise.", includes: ["priority_support", "support_sla_hours"]),
-  feature("support_sla_hours", "config", name: "Support SLA", description: "Hours until the first reply.", unit: "hours"),
-  feature("team_seats", "config", name: "Team seats", description: "People who can join a workspace.", unit: "seats"),
+  feature(
+    "team_essentials", "group", name: "Team essentials",
+    description: "Everything a team needs, as one unit.",
+    includes: ["collaboration", "support_extras"]),
+  feature(
+    "ai_credits", "metered", name: "AI credits", description: "Spent on AI actions each month.",
+    unit: "credits"),
+  feature(
+    "collaboration", "group", name: "Collaboration", description: "Working with other people.",
+    includes: ["team_seats", "shared_folders"]),
+  feature(
+    "export_pdf", "boolean", name: "Export to PDF", description: "Download any document as a PDF."),
+  feature(
+    "priority_support", "boolean", name: "Priority support", description: "Jump the support queue."),
+  feature(
+    "shared_folders", "boolean", name: "Shared folders",
+    description: "Folders the whole workspace can see."),
+  feature(
+    "sso", "boolean", name: "Single sign-on",
+    description: "Log in through the customer's identity provider."),
+  feature(
+    "support_contacts", "config", name: "Support contacts",
+    description: "People who can open tickets.", unit: "contacts"),
+  feature(
+    "support_extras", "group", name: "Support extras",
+    description: "Priority queue plus a reply-time promise.",
+    includes: ["priority_support", "support_sla_hours"]),
+  feature(
+    "support_sla_hours", "config", name: "Support SLA", description: "Hours until the first reply.",
+    unit: "hours"),
+  feature(
+    "team_seats", "config", name: "Team seats", description: "People who can join a workspace.",
+    unit: "seats"),
 ].joined(separator: ",")
 
 @Suite struct GeneratorTests {
@@ -62,15 +87,23 @@ let sampleCatalogue = [
   @Test func escapesReservedAndTakenNamesAndRendersEdgeCases() throws {
     let list = featureList(
       [
-        feature("default", "boolean"), feature("self", "boolean"), feature("a_b", "boolean"), feature("a__b", "config"),
-        feature("ab", "boolean"), feature("old_reports", "boolean", name: "", description: "Line one.\\nLine two.", archived: true),
+        feature("default", "boolean"), feature("self", "boolean"), feature("a_b", "boolean"),
+        feature("a__b", "config"),
+        feature("ab", "boolean"),
+        feature(
+          "old_reports", "boolean", name: "", description: "Line one.\\nLine two.", archived: true),
         feature("hologram", "quantum"),
         feature("loop_a", "group", includes: ["loop_b", "sso_x", "missing", "sso_x"]),
         feature("loop_b", "group", includes: ["loop_a", "sso_x"]),
         feature("sso_x", "boolean"),
-        feature("everything_in_a_very_long_group_name_for_wrapping", "group", includes: (1...12).map { "member_feature_\($0)" }),
-        feature("medium_group_name", "group", includes: ["member_feature_1", "member_feature_2", "member_feature_3"]),
-      ].joined(separator: ",") + "," + (1...12).map { feature("member_feature_\($0)", "boolean") }.joined(separator: ","),
+        feature(
+          "everything_in_a_very_long_group_name_for_wrapping", "group",
+          includes: (1...12).map { "member_feature_\($0)" }),
+        feature(
+          "medium_group_name", "group",
+          includes: ["member_feature_1", "member_feature_2", "member_feature_3"]),
+      ].joined(separator: ",") + ","
+        + (1...12).map { feature("member_feature_\($0)", "boolean") }.joined(separator: ","),
       release: "null", change: #""chg_42""#)
     try Golden.check(renderFeatures(list, accessLevel: .public), "EdgeFeatures.swift.txt")
   }
@@ -86,9 +119,19 @@ let sampleCatalogue = [
       }
       """
     let names = existingFeatureNames(in: existing)
-    #expect(names == ["export_pdf": "pdfExport", "removed": "gone", "collaboration": "groupOfThings", "ai_credits": "credits"])
-    let list = featureList([feature("export_pdf", "boolean"), feature("export_p_d_f", "boolean"), feature("ai_credits", "metered")].joined(separator: ","))
-    let source = renderFeatures(list, existingSource: existing + "\n static let exportPDF = Feature<OnOff>(\"taken_elsewhere\")")
+    #expect(
+      names == [
+        "export_pdf": "pdfExport", "removed": "gone", "collaboration": "groupOfThings",
+        "ai_credits": "credits",
+      ])
+    let list = featureList(
+      [
+        feature("export_pdf", "boolean"), feature("export_p_d_f", "boolean"),
+        feature("ai_credits", "metered"),
+      ].joined(separator: ","))
+    let source = renderFeatures(
+      list,
+      existingSource: existing + "\n static let exportPDF = Feature<OnOff>(\"taken_elsewhere\")")
     #expect(source.contains("static let pdfExport = Feature<OnOff>(\"export_pdf\")"))
     #expect(source.contains("static let credits = Feature<Metered>(\"ai_credits\")"))
     #expect(source.contains("static let exportPDF = Feature<OnOff>(\"export_p_d_f\")"))
@@ -101,20 +144,28 @@ let sampleCatalogue = [
 }
 
 @Suite struct GeneratorCommandTests {
-  func run(_ arguments: [String], api: FakeAPI, environment: [String: String] = ["ENTITLER_KEY": "sk_env"]) async -> (Int32, [String]) {
+  func run(
+    _ arguments: [String], api: FakeAPI, environment: [String: String] = ["ENTITLER_KEY": "sk_env"]
+  ) async -> (Int32, [String]) {
     let lines = Box<[String]>([])
     let code = await api.run {
-      await GeneratorCommand.run(arguments, environment: environment, options: api.options()) { line in lines.with { $0.append(line) } }
+      await GeneratorCommand.run(arguments, environment: environment, options: api.options()) {
+        line in lines.with { $0.append(line) }
+      }
     }
     return (code, lines.get)
   }
 
   func temporaryFile() -> String {
-    FileManager.default.temporaryDirectory.appendingPathComponent("entitler-\(UUID().uuidString).swift").path
+    FileManager.default.temporaryDirectory.appendingPathComponent(
+      "entitler-\(UUID().uuidString).swift"
+    ).path
   }
 
   func catalogue(_ features: String, release: Int = 2) -> Reply {
-    .json(#"{"environment":{"id":"e","name":"development","kind":"test"},"track":{"id":"t","name":"All customers"},"release":\#(release),"change":null,"features":[\#(features)]}"#)
+    .json(
+      #"{"environment":{"id":"e","name":"development","kind":"test"},"track":{"id":"t","name":"All customers"},"release":\#(release),"change":null,"features":[\#(features)]}"#
+    )
   }
 
   @Test func writesThenChecks() async throws {
@@ -174,12 +225,17 @@ let sampleCatalogue = [
     #expect(code == 1)
     (code, lines) = await run(["generate"], api: api, environment: [:])
     #expect(code == 1)
-    #expect(lines == ["Provide an API key with --key or set ENTITLER_KEY. The key needs the plans:read scope."])
+    #expect(
+      lines == [
+        "Provide an API key with --key or set ENTITLER_KEY. The key needs the plans:read scope."
+      ])
     #expect(api.count == 0)
   }
 
   @Test func apiFailuresAreReported() async {
-    let api = FakeAPI { _ in .error(403, code: "scope_required", message: "The key needs plans:read.") }
+    let api = FakeAPI { _ in
+      .error(403, code: "scope_required", message: "The key needs plans:read.")
+    }
     var (code, lines) = await run(["generate", "--out", temporaryFile()], api: api)
     #expect(code == 1)
     #expect(lines == ["Entitler request failed: The key needs plans:read. (scope_required)"])

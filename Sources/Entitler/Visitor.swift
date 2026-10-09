@@ -9,7 +9,8 @@ public let visitorIDPattern = "^[A-Za-z0-9_-]{16,64}$"
 /// the same experiment arm on every page and after signing up.
 public func newVisitorID() -> String {
   var generator = SystemRandomNumberGenerator()
-  return Base64URL.encode(Data((0..<24).map { _ in UInt8.random(in: .min ... .max, using: &generator) }))
+  return Base64URL.encode(
+    Data((0..<24).map { _ in UInt8.random(in: .min ... .max, using: &generator) }))
 }
 
 func validVisitor(_ visitor: String?) throws -> String? {
@@ -22,7 +23,8 @@ func validVisitor(_ visitor: String?) throws -> String? {
 
 func validIdempotencyKey(_ key: String?) throws -> String? {
   guard let key else { return nil }
-  guard (1...200).contains(key.utf8.count), key.utf8.allSatisfy({ (0x20...0x7e).contains($0) }) else {
+  guard (1...200).contains(key.utf8.count), key.utf8.allSatisfy({ (0x20...0x7e).contains($0) })
+  else {
     throw ArgumentError(message: Messages.idempotencyKey)
   }
   return key

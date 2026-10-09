@@ -7,10 +7,12 @@ let liveKey = ProcessInfo.processInfo.environment["ENTITLER_TEST_KEY"] ?? ""
 
 enum Live {
   static let aiCredits = Feature<Metered>("ai_credits")
-  static let collaboration = Feature<FeatureGroup>("collaboration", includes: ["team_seats", "shared_folders"])
+  static let collaboration = Feature<FeatureGroup>(
+    "collaboration", includes: ["team_seats", "shared_folders"])
   static let sso = Feature<OnOff>("sso")
 
-  static func server(_ change: (inout EntitlerOptions) -> Void = { _ in }) throws -> EntitlerServer {
+  static func server(_ change: (inout EntitlerOptions) -> Void = { _ in }) throws -> EntitlerServer
+  {
     var options = EntitlerOptions()
     change(&options)
     return try EntitlerServer(key: liveKey, options: options)
@@ -51,7 +53,9 @@ struct LiveTests {
     let features = try await server.features()
     #expect(features.track.name == "All customers")
     #expect(
-      Set(features.features.map(\.key)).isSuperset(of: ["ai_credits", "collaboration", "export_pdf", "sso", "team_seats"]))
+      Set(features.features.map(\.key)).isSuperset(of: [
+        "ai_credits", "collaboration", "export_pdf", "sso", "team_seats",
+      ]))
     #expect(features.features.first { $0.key == "ai_credits" }?.type == .metered)
   }
 
@@ -103,10 +107,12 @@ struct LiveTests {
   @Test func usage() async throws {
     try await Live.withCustomer { server, customer in
       let key = "rec-\(UUID().uuidString)"
-      let recorded = try await customer.recordUsage(of: Live.aiCredits, amount: 5, idempotencyKey: key)
+      let recorded = try await customer.recordUsage(
+        of: Live.aiCredits, amount: 5, idempotencyKey: key)
       #expect(recorded.outcome == .recorded)
       #expect(recorded.used == 5)
-      let replay = try await customer.recordUsage(of: Live.aiCredits, amount: 5, idempotencyKey: key)
+      let replay = try await customer.recordUsage(
+        of: Live.aiCredits, amount: 5, idempotencyKey: key)
       #expect(replay.outcome == .duplicate)
       let refused = try await customer.recordUsage(of: Live.aiCredits, amount: 100)
       #expect(refused.outcome == .refused)
@@ -142,8 +148,10 @@ struct LiveTests {
 
       let batchKey = "batch-\(UUID().uuidString)"
       let events = [
-        UsageBatchEvent(customer: customer.id, feature: Live.aiCredits, amount: 1, idempotencyKey: batchKey),
-        UsageBatchEvent(customer: customer.id, feature: Live.aiCredits, amount: 1, idempotencyKey: batchKey),
+        UsageBatchEvent(
+          customer: customer.id, feature: Live.aiCredits, amount: 1, idempotencyKey: batchKey),
+        UsageBatchEvent(
+          customer: customer.id, feature: Live.aiCredits, amount: 1, idempotencyKey: batchKey),
       ]
       let batch = try await server.recordUsageBatch(events)
       #expect(batch.results.map(\.outcome) == [.recorded, .duplicate])
@@ -197,7 +205,8 @@ struct LiveTests {
       let keys = try await server.snapshotKeys()
       let environment = try await customer.check(Live.sso).environment.id
       let snapshot = try verifySnapshot(
-        issued.token, expecting: SnapshotExpectation(keys: keys, customer: customer.id, environment: environment))
+        issued.token,
+        expecting: SnapshotExpectation(keys: keys, customer: customer.id, environment: environment))
       #expect(snapshot.customer == customer.id)
       #expect(snapshot.entitlements.has(Live.aiCredits))
       #expect(!snapshot.entitlements.has(Live.collaboration))
@@ -236,7 +245,9 @@ struct LiveTests {
       #expect(team.customer.plan?.key == "team")
       #expect(team.selfServe == false)
       let added = try await customer.addAddOn("sso_addon")
-      #expect(added.addOns.contains { $0.plan.key == "sso_addon" } || added.subscription?.addOns.contains { $0.plan.key == "sso_addon" } == true)
+      #expect(
+        added.addOns.contains { $0.plan.key == "sso_addon" }
+          || added.subscription?.addOns.contains { $0.plan.key == "sso_addon" } == true)
       let removed = try await customer.removeAddOn("sso_addon")
       #expect(!removed.addOns.contains { $0.plan.key == "sso_addon" })
       let granted = try await customer.vendor.grant(Live.sso, days: 1, reason: "SDK test")
@@ -245,8 +256,15 @@ struct LiveTests {
       #expect(revoked.grants.first { $0.id == grant.id }?.revokedAt != nil)
       #expect(try await customer.vendor.setMeter(Live.aiCredits, to: 3).outcome == .adjusted)
       for call in [
-        { _ = try await customer.checkout("pro", successURL: URL(string: "https://example.com/ok")!, cancelURL: URL(string: "https://example.com/no")!) },
-        { _ = try await customer.billingPortal(returnURL: URL(string: "https://example.com/account")!) },
+        {
+          _ = try await customer.checkout(
+            "pro", successURL: URL(string: "https://example.com/ok")!,
+            cancelURL: URL(string: "https://example.com/no")!)
+        },
+        {
+          _ = try await customer.billingPortal(
+            returnURL: URL(string: "https://example.com/account")!)
+        },
       ] as [() async throws -> Void] {
         do {
           try await call()
@@ -260,9 +278,11 @@ struct LiveTests {
   }
 
   @Test func listSearchAndDelete() async throws {
-    try await Live.withCustomer(name: "Searchable \(UUID().uuidString.prefix(6))") { server, customer in
+    try await Live.withCustomer(name: "Searchable \(UUID().uuidString.prefix(6))") {
+      server, customer in
       var found = false
-      for try await summary in server.customers.list(query: customer.id) where summary.externalID == customer.id {
+      for try await summary in server.customers.list(query: customer.id)
+      where summary.externalID == customer.id {
         found = true
       }
       #expect(found)

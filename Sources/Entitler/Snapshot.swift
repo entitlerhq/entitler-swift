@@ -53,7 +53,8 @@ public struct SnapshotExpectation: Sendable {
   /// Creates an expectation from a list of keys.
   public init(
     keys: [JSONWebKey], customer: String, environment: String,
-    issuer: String = "https://api.entitler.dev/customers", now: Date? = nil, clockSkewSeconds: Int = 60
+    issuer: String = "https://api.entitler.dev/customers", now: Date? = nil,
+    clockSkewSeconds: Int = 60
   ) {
     self.keys = keys
     self.customer = customer
@@ -66,7 +67,8 @@ public struct SnapshotExpectation: Sendable {
   /// Creates an expectation from a key set.
   public init(
     keys: JSONWebKeySet, customer: String, environment: String,
-    issuer: String = "https://api.entitler.dev/customers", now: Date? = nil, clockSkewSeconds: Int = 60
+    issuer: String = "https://api.entitler.dev/customers", now: Date? = nil,
+    clockSkewSeconds: Int = 60
   ) {
     self.init(
       keys: keys.keys, customer: customer, environment: environment, issuer: issuer, now: now,
@@ -140,7 +142,8 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
   func fail(_ code: SnapshotError.Code = .invalid, _ message: String) -> EntitlerError {
     .snapshot(SnapshotError(code: code, message: message))
   }
-  let malformed = fail(.invalid, "That is not an entitlements snapshot. Pass the token snapshot() returned.")
+  let malformed = fail(
+    .invalid, "That is not an entitlements snapshot. Pass the token snapshot() returned.")
   let segments = token.split(separator: ".", omittingEmptySubsequences: false)
   guard segments.count == 3,
     let headerData = Base64URL.decode(segments[0]),
@@ -150,7 +153,9 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
   else { throw malformed }
 
   guard let key = expected.keys.first(where: { $0.kid == header.kid }) else {
-    throw fail(.invalid, "None of the keys passed signed this snapshot. Fetch them again with snapshotKeys().")
+    throw fail(
+      .invalid,
+      "None of the keys passed signed this snapshot. Fetch them again with snapshotKeys().")
   }
   let changed = fail(.invalid, "This snapshot was changed after Entitler signed it.")
   guard let x = Base64URL.decode(key.x), let y = Base64URL.decode(key.y),
@@ -175,7 +180,9 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
     )
   }
   guard now < expiresAt else {
-    throw fail(.expired, "This snapshot expired at \(formatInstant(expiresAt)). Fetch a new one while online.")
+    throw fail(
+      .expired,
+      "This snapshot expired at \(formatInstant(expiresAt)). Fetch a new one while online.")
   }
   guard claims.sub == expected.customer else {
     throw fail(

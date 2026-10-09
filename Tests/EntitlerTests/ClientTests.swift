@@ -11,7 +11,9 @@ import Testing
     #expect(throws: ArgumentError(message: "Provide a customer token minted by your server.")) {
       try EntitlerClient(token: "")
     }
-    #expect(throws: ArgumentError(message: "Provide the identity token your sign-in provider issued.")) {
+    #expect(
+      throws: ArgumentError(message: "Provide the identity token your sign-in provider issued.")
+    ) {
       try EntitlerClient(key: "pk_1", identityToken: " ")
     }
     #expect(throws: ArgumentError(message: "Provide an Entitler API key from the dashboard.")) {
@@ -27,17 +29,20 @@ import Testing
       try EntitlerClient(token: "t", visitor: "short")
     }
     #expect(throws: ArgumentError(message: "Pass asOf as a valid date.")) {
-      try EntitlerServer(key: "sk", options: EntitlerOptions(asOf: Date(timeIntervalSince1970: .nan)))
+      try EntitlerServer(
+        key: "sk", options: EntitlerOptions(asOf: Date(timeIntervalSince1970: .nan)))
     }
     let client = try EntitlerClient(tokenProvider: { "x" }, visitor: "abcdefghijklmnop")
     #expect(client.visitor == "abcdefghijklmnop")
   }
 
   @Test func stringFormsNeverShowCredentials() throws {
-    let server = try EntitlerServer(key: "sk_secret", options: EntitlerOptions(baseURL: URL(string: "https://x.test//")!))
+    let server = try EntitlerServer(
+      key: "sk_secret", options: EntitlerOptions(baseURL: URL(string: "https://x.test//")!))
     #expect(server.description == "EntitlerServer(https://x.test)")
     let client = try EntitlerClient(key: "pk_secret", identityToken: "id_secret")
-    #expect(client.description == "EntitlerClient(in-app, identity token, https://api.entitler.dev)")
+    #expect(
+      client.description == "EntitlerClient(in-app, identity token, https://api.entitler.dev)")
     let tokenClient = try EntitlerClient(token: "tok_secret")
     #expect(tokenClient.description.contains("customer token"))
     for value in [server as Any, client, tokenClient, try server.customer("u"), client.me] {
@@ -94,11 +99,16 @@ import Testing
 
   @Test func typedChecksDecodeMeteredAnswers() async throws {
     let api = FakeAPI { _ in .json(Fixture.meteredCheck) }
-    let check = try await api.run { try await api.server().customer("u").check(Feature<Metered>("ai_credits")) }
+    let check = try await api.run {
+      try await api.server().customer("u").check(Feature<Metered>("ai_credits"))
+    }
     #expect(check.used == 10)
     #expect(check.held == 5)
     #expect(check.remaining == .amount(285))
-    #expect(abs(try #require(check.resetsAt).timeIntervalSince(try #require(parseInstant("2026-10-18T19:30:35.544Z")))) < 0.001)
+    #expect(
+      abs(
+        try #require(check.resetsAt).timeIntervalSince(
+          try #require(parseInstant("2026-10-18T19:30:35.544Z")))) < 0.001)
     #expect(check.track.name == "All customers")
     #expect(check.release == 2)
     #expect(check.environment.kind == .test)
@@ -117,13 +127,21 @@ import Testing
     let api = FakeAPI { request in
       switch request.path {
       case "/keys/self":
-        .json(#"{"id":"k","scopes":["usage:write","plans:read","plans:publish","tracks:assign"],"registration":true}"#)
+        .json(
+          #"{"id":"k","scopes":["usage:write","plans:read","plans:publish","tracks:assign"],"registration":true}"#
+        )
       case "/customers/snapshot-keys":
-        .json(#"{"keys":[{"kty":"EC","crv":"P-256","x":"a","y":"b","kid":"k1","alg":"ES256","use":"sig"}]}"#)
+        .json(
+          #"{"keys":[{"kty":"EC","crv":"P-256","x":"a","y":"b","kid":"k1","alg":"ES256","use":"sig"}]}"#
+        )
       case "/pricing/features":
-        .json(#"{"environment":{"id":"e","name":"development","kind":"test"},"track":{"id":"t","name":"All customers"},"release":3,"change":null,"features":[{"id":"f","key":"sso","name":"SSO","type":"boolean","description":"","unit":"","resetEvery":{"count":1,"unit":"months"},"archived":false,"includes":[]}]}"#)
+        .json(
+          #"{"environment":{"id":"e","name":"development","kind":"test"},"track":{"id":"t","name":"All customers"},"release":3,"change":null,"features":[{"id":"f","key":"sso","name":"SSO","type":"boolean","description":"","unit":"","resetEvery":{"count":1,"unit":"months"},"archived":false,"includes":[]}]}"#
+        )
       default:
-        .json(#"{\#(Fixture.context),"customer":null,"defaultPlan":"free","products":[{"key":"app","name":"App","defaultPlan":"free"}],"plans":[{"id":"p","key":"pro","name":"Pro","description":"","kind":"plan","product":"app","salesLed":false,"status":"active","version":1,"default":false,"periods":[{"label":"monthly","count":1,"unit":"months"}],"attachesTo":[],"features":{"sso":true,"seats":5,"credits":"unlimited"},"listings":[{"period":"monthly","channels":[{"channel":{"provider":"stripe","connectionId":"c1"},"name":"Stripe","mode":"test","purchasable":true,"ids":{"price":"price_1"},"price":{"amount":1000,"currency":"aud","interval":"month","intervalCount":1,"tax":"exclusive"}}]}]}]}"#)
+        .json(
+          #"{\#(Fixture.context),"customer":null,"defaultPlan":"free","products":[{"key":"app","name":"App","defaultPlan":"free"}],"plans":[{"id":"p","key":"pro","name":"Pro","description":"","kind":"plan","product":"app","salesLed":false,"status":"active","version":1,"default":false,"periods":[{"label":"monthly","count":1,"unit":"months"}],"attachesTo":[],"features":{"sso":true,"seats":5,"credits":"unlimited"},"listings":[{"period":"monthly","channels":[{"channel":{"provider":"stripe","connectionId":"c1"},"name":"Stripe","mode":"test","purchasable":true,"ids":{"price":"price_1"},"price":{"amount":1000,"currency":"aud","interval":"month","intervalCount":1,"tax":"exclusive"}}]}]}]}"#
+        )
       }
     }
     let server = try api.server()
@@ -159,7 +177,9 @@ import Testing
         status: 402, headers: ["x-request-id": "req_1"])
     }
     do {
-      _ = try await api.run { try await api.server().customer("u").subscribe(to: "pro", idempotencyKey: "key-1") }
+      _ = try await api.run {
+        try await api.server().customer("u").subscribe(to: "pro", idempotencyKey: "key-1")
+      }
       Issue.record("Expected an error")
     } catch EntitlerError.api(let error) {
       #expect(error.status == 402)
@@ -204,7 +224,8 @@ import Testing
   }
 
   @Test func connectionAndTimeoutErrorsDescribeThemselves() {
-    let connection = ConnectionError(underlyingError: URLError(.cannotConnectToHost), idempotencyKey: "k")
+    let connection = ConnectionError(
+      underlyingError: URLError(.cannotConnectToHost), idempotencyKey: "k")
     #expect(connection.description.hasPrefix("Entitler could not be reached"))
     #expect(EntitlerError.connection(connection).errorDescription == connection.message)
     let timeout = TimeoutError(timeout: 5, idempotencyKey: nil)

@@ -132,12 +132,15 @@ extension Customer {
   ///
   /// - Parameter visitor: On the server, the visitor id the customer had while signed out, so
   ///   they keep their experiment arm. An in-app client sends its own.
-  public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing {
+  public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing
+  {
     try await handle.read(["pricing"], visitor: visitor, timeout: timeout)
   }
 
   /// The customer's meters and the first page of their usage log.
-  public func usage(cursor: String? = nil, timeout: TimeInterval? = nil) async throws -> CustomerUsage {
+  public func usage(cursor: String? = nil, timeout: TimeInterval? = nil) async throws
+    -> CustomerUsage
+  {
     var request = try handle.request("GET", ["usage"], timeout: timeout)
     if let cursor { request.query = [("cursor", cursor)] }
     return try await handle.core.call(request)
@@ -235,7 +238,8 @@ extension Customer {
 
   /// Reads a hold back.
   public func hold(id holdID: String, timeout: TimeInterval? = nil) async throws -> UsageHold {
-    try await handle.call("GET", ["usage", "holds", require(holdID, Messages.hold)], timeout: timeout)
+    try await handle.call(
+      "GET", ["usage", "holds", require(holdID, Messages.hold)], timeout: timeout)
   }
 
   /// Holds `amount`, runs `work`, and settles the amount `work` answers.
@@ -309,7 +313,9 @@ extension Customer {
   /// ``verifySnapshot(_:expecting:)``.
   ///
   /// - Parameter ttlSeconds: How long it lasts, at most the project's offline days.
-  public func snapshot(ttlSeconds: Int? = nil, timeout: TimeInterval? = nil) async throws -> IssuedSnapshot {
+  public func snapshot(ttlSeconds: Int? = nil, timeout: TimeInterval? = nil) async throws
+    -> IssuedSnapshot
+  {
     try await handle.call(
       "POST", ["snapshots"], body: SnapshotBody(ttlSeconds: ttlSeconds), timeout: timeout)
   }
@@ -327,7 +333,9 @@ public struct PagedList<Item: Codable & Hashable & Sendable>: AsyncSequence, Sen
   public var pages: Pages { Pages(fetch: fetch) }
 
   /// Makes an iterator over every item.
-  public func makeAsyncIterator() -> AsyncIterator { AsyncIterator(pages: pages.makeAsyncIterator()) }
+  public func makeAsyncIterator() -> AsyncIterator {
+    AsyncIterator(pages: pages.makeAsyncIterator())
+  }
 
   /// Iterates every item across pages.
   public struct AsyncIterator: AsyncIteratorProtocol {

@@ -122,7 +122,8 @@ extension String {
 
 enum Base64URL {
   static func decode(_ text: some StringProtocol) -> Data? {
-    var base64 = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+    var base64 = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(
+      of: "_", with: "/")
     guard !base64.contains("=") else { return nil }
     base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
     return Data(base64Encoded: base64)

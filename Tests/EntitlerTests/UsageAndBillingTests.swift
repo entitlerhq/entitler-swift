@@ -18,7 +18,8 @@ import Testing
       #expect(api.last.header("Idempotency-Key")?.count == 36)
       #expect(api.last.json?.keys.sorted() == ["amount", "feature"])
       try await customer.recordUsage(
-        of: "ai_credits", amount: 2, mode: .observe, occurredAt: Date(timeIntervalSince1970: 1_782_898_200),
+        of: "ai_credits", amount: 2, mode: .observe,
+        occurredAt: Date(timeIntervalSince1970: 1_782_898_200),
         register: true)
       let json = try #require(api.last.json)
       #expect(json["mode"] as? String == "observe")
@@ -27,10 +28,19 @@ import Testing
     }
   }
 
-  @Test(arguments: ["recorded", "duplicate", "refused", "held", "settled", "released", "cancelled", "adjusted", "brand_new"])
+  @Test(arguments: [
+    "recorded", "duplicate", "refused", "held", "settled", "released", "cancelled", "adjusted",
+    "brand_new",
+  ])
   func everyOutcomeDecodes(outcome: String) async throws {
-    let api = FakeAPI { _ in .json(Fixture.usage(outcome: outcome, refusal: outcome == "refused" ? #""over_allowance""# : "null")) }
-    let result = try await api.run { try await api.server().customer("u").recordUsage(of: "ai_credits", amount: 1) }
+    let api = FakeAPI { _ in
+      .json(
+        Fixture.usage(
+          outcome: outcome, refusal: outcome == "refused" ? #""over_allowance""# : "null"))
+    }
+    let result = try await api.run {
+      try await api.server().customer("u").recordUsage(of: "ai_credits", amount: 1)
+    }
     #expect(result.outcome.rawValue == outcome)
     #expect(result.outcome == UsageOutcome(rawValue: outcome))
     if outcome == "refused" { #expect(result.refusal == .overAllowance) }
@@ -40,12 +50,15 @@ import Testing
   @Test func holdsSettleReleaseAndReadBack() async throws {
     let api = FakeAPI { request in
       request.method == "GET"
-        ? .json(#"{"id":"h_1","customer":"u","feature":"ai_credits","amount":10,"state":"open","expiresAt":"2026-10-09T01:52:13Z","settledAmount":null,"usageId":null,"createdAt":"2026-10-09T01:47:13Z"}"#)
+        ? .json(
+          #"{"id":"h_1","customer":"u","feature":"ai_credits","amount":10,"state":"open","expiresAt":"2026-10-09T01:52:13Z","settledAmount":null,"usageId":null,"createdAt":"2026-10-09T01:47:13Z"}"#
+        )
         : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#))
     }
     let customer = try api.server().customer("u")
     try await api.run {
-      let held = try await customer.holdUsage(of: Feature<Metered>("ai_credits"), amount: 10, ttlSeconds: 60)
+      let held = try await customer.holdUsage(
+        of: Feature<Metered>("ai_credits"), amount: 10, ttlSeconds: 60)
       #expect(held.holdID == "h_1")
       #expect(api.last.path == "/customers/u/usage/holds")
       #expect(api.last.json?["ttlSeconds"] as? Int == 60)
@@ -68,13 +81,18 @@ import Testing
     let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#, amount: 10)) }
     let customer = try api.server().customer("u")
     let used = try await api.run {
-      try await customer.withHold(of: Feature<Metered>("ai_credits"), amount: 10, idempotencyKey: "job-1") { hold in
+      try await customer.withHold(
+        of: Feature<Metered>("ai_credits"), amount: 10, idempotencyKey: "job-1"
+      ) { hold in
         #expect(hold.holdID == "h_1")
         return 7
       }
     }
     #expect(used == 7)
-    #expect(api.requests.get.map(\.path) == ["/customers/u/usage/holds", "/customers/u/usage/holds/h_1/settle"])
+    #expect(
+      api.requests.get.map(\.path) == [
+        "/customers/u/usage/holds", "/customers/u/usage/holds/h_1/settle",
+      ])
     #expect(api.last.json?["amount"] as? Int == 7)
     #expect(api.requests.get[0].header("Idempotency-Key") == "job-1")
   }
@@ -82,7 +100,9 @@ import Testing
   @Test func withHoldRecordsTheExcessInObserveMode() async throws {
     let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#, amount: 10)) }
     let customer = try api.server().customer("u")
-    _ = try await api.run { try await customer.withHold(of: "ai_credits", amount: 10, idempotencyKey: "job-2") { _ in 15 } }
+    _ = try await api.run {
+      try await customer.withHold(of: "ai_credits", amount: 10, idempotencyKey: "job-2") { _ in 15 }
+    }
     let requests = api.requests.get
     #expect(requests.count == 3)
     #expect(requests[1].json?["amount"] as? Int == 10)
@@ -97,7 +117,9 @@ import Testing
     let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#)) }
     let customer = try api.server().customer("u")
     await #expect(throws: WorkFailed.self) {
-      try await api.run { try await customer.withHold(of: "ai_credits", amount: 10) { _ in throw WorkFailed() } }
+      try await api.run {
+        try await customer.withHold(of: "ai_credits", amount: 10) { _ in throw WorkFailed() }
+      }
     }
     #expect(api.last.method == "DELETE")
     #expect(api.last.path == "/customers/u/usage/holds/h_1")
@@ -107,11 +129,14 @@ import Testing
     struct WorkFailed: Error {}
     let errors = Box(0)
     let api = FakeAPI { request in
-      request.method == "DELETE" ? .error(404, code: "not_found") : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#))
+      request.method == "DELETE"
+        ? .error(404, code: "not_found") : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#))
     }
     let customer = try api.server { $0.onError = { _ in errors.with { $0 += 1 } } }.customer("u")
     await #expect(throws: WorkFailed.self) {
-      try await api.run { try await customer.withHold(of: "ai_credits", amount: 10) { _ in throw WorkFailed() } }
+      try await api.run {
+        try await customer.withHold(of: "ai_credits", amount: 10) { _ in throw WorkFailed() }
+      }
     }
     #expect(errors.get == 1)
   }
@@ -137,10 +162,13 @@ import Testing
   @Test func failedSettlementCarriesTheHoldID() async throws {
     let api = FakeAPI { request in
       request.path.hasSuffix("/settle")
-        ? .error(409, code: "hold_expired") : .json(Fixture.usage(outcome: "held", holdID: #""h_7""#))
+        ? .error(409, code: "hold_expired")
+        : .json(Fixture.usage(outcome: "held", holdID: #""h_7""#))
     }
     do {
-      _ = try await api.run { try await api.server().customer("u").withHold(of: "ai_credits", amount: 10) { _ in 3 } }
+      _ = try await api.run {
+        try await api.server().customer("u").withHold(of: "ai_credits", amount: 10) { _ in 3 }
+      }
       Issue.record("Expected an error")
     } catch EntitlerError.api(let error) {
       #expect(error.code == .holdExpired)
@@ -149,7 +177,8 @@ import Testing
   }
 
   @Test func holdIDsAttachToEveryRequestError() {
-    let connection = EntitlerError.connection(ConnectionError(underlyingError: URLError(.timedOut), idempotencyKey: nil))
+    let connection = EntitlerError.connection(
+      ConnectionError(underlyingError: URLError(.timedOut), idempotencyKey: nil))
     if case .connection(let error) = connection.withHoldID("h") { #expect(error.holdID == "h") }
     let timeout = EntitlerError.timeout(TimeoutError(timeout: 1, idempotencyKey: nil))
     if case .timeout(let error) = timeout.withHoldID("h") { #expect(error.holdID == "h") }
@@ -167,7 +196,9 @@ import Testing
     ]
     let api = FakeAPI { request in
       let index = request.query == nil ? 0 : request.query == "cursor=c2" ? 1 : 2
-      return .json(#"{"customer":"u","asOf":"2026-10-09T01:47:13Z","metersStartAgainAt":null,"features":[{"feature":"ai_credits","type":"metered","entitled":true,"value":300,"sources":[],"used":3,"held":0,"remaining":297,"resetsAt":null}],"log":\#(pages[index]),\#(Fixture.context)}"#)
+      return .json(
+        #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","metersStartAgainAt":null,"features":[{"feature":"ai_credits","type":"metered","entitled":true,"value":300,"sources":[],"used":3,"held":0,"remaining":297,"resetsAt":null}],"log":\#(pages[index]),\#(Fixture.context)}"#
+      )
     }
     let customer = try api.server().customer("u")
     try await api.run {
@@ -186,7 +217,9 @@ import Testing
 
   @Test func usageLogRequestsPagesOnlyWhenReached() async throws {
     let api = FakeAPI { _ in
-      .json(#"{"customer":"u","asOf":"2026-10-09T01:47:13Z","metersStartAgainAt":null,"features":[],"log":{"items":[{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","actor":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}],"next":"more"},\#(Fixture.context)}"#)
+      .json(
+        #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","metersStartAgainAt":null,"features":[],"log":{"items":[{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","actor":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}],"next":"more"},\#(Fixture.context)}"#
+      )
     }
     let customer = try api.server().customer("u")
     try await api.run {
@@ -199,13 +232,21 @@ import Testing
   @Test func batchesSplitAtFiveHundredAndKeepInputOrder() async throws {
     let api = FakeAPI { request in
       let events = (request.json?["events"] as? [[String: Any]]) ?? []
-      let results = events.indices.map { #"{"index":\#($0),"outcome":"recorded","id":"u_\#($0)","late":false,"error":null}"# }
-      return .json(#"{"results":[\#(results.joined(separator: ","))],"recorded":\#(events.count),"duplicates":0,"errors":0}"#)
+      let results = events.indices.map {
+        #"{"index":\#($0),"outcome":"recorded","id":"u_\#($0)","late":false,"error":null}"#
+      }
+      return .json(
+        #"{"results":[\#(results.joined(separator: ","))],"recorded":\#(events.count),"duplicates":0,"errors":0}"#
+      )
     }
     let events = (0..<1_001).map {
-      UsageBatchEvent(customer: "c\($0)", feature: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: $0 == 0 ? "first" : nil)
+      UsageBatchEvent(
+        customer: "c\($0)", feature: Feature<Metered>("ai_credits"), amount: 1,
+        idempotencyKey: $0 == 0 ? "first" : nil)
     }
-    let result = try await api.run { try await api.server().recordUsageBatch(events, register: true) }
+    let result = try await api.run {
+      try await api.server().recordUsageBatch(events, register: true)
+    }
     #expect(api.requests.get.map { ($0.json?["events"] as? [Any])?.count } == [500, 500, 1])
     #expect(result.results.count == 1_001)
     #expect(result.results.map(\.index) == Array(0..<1_001))
@@ -220,24 +261,30 @@ import Testing
 
   @Test func batchErrorsDecode() async throws {
     let api = FakeAPI { _ in
-      .json(#"{"results":[{"index":0,"outcome":"error","id":null,"late":false,"error":{"code":"not_metered","message":"No."}},{"index":1,"outcome":"duplicate","id":"u_1","late":true,"error":null}],"recorded":0,"duplicates":1,"errors":1}"#)
+      .json(
+        #"{"results":[{"index":0,"outcome":"error","id":null,"late":false,"error":{"code":"not_metered","message":"No."}},{"index":1,"outcome":"duplicate","id":"u_1","late":true,"error":null}],"recorded":0,"duplicates":1,"errors":1}"#
+      )
     }
     let result = try await api.run {
       try await api.server().recordUsageBatch([
-        UsageBatchEvent(customer: "a", feature: "sso"), UsageBatchEvent(customer: "b", feature: "ai_credits"),
+        UsageBatchEvent(customer: "a", feature: "sso"),
+        UsageBatchEvent(customer: "b", feature: "ai_credits"),
       ])
     }
     #expect(result.results[0].error?.code == .notMetered)
     #expect(result.results[1].outcome == .duplicate)
     #expect(result.duplicates == 1)
     #expect(api.last.json?["register"] == nil)
-    await #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer.")) {
+    await #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer."))
+    {
       try await api.server().recordUsageBatch([UsageBatchEvent(customer: " ", feature: "f")])
     }
   }
 
   @Test func snapshotsAreMinted() async throws {
-    let api = FakeAPI { _ in .json(#"{"token":"a.b.c","expiresAt":"2026-10-10T00:00:00Z","keyId":"k1"}"#, status: 201) }
+    let api = FakeAPI { _ in
+      .json(#"{"token":"a.b.c","expiresAt":"2026-10-10T00:00:00Z","keyId":"k1"}"#, status: 201)
+    }
     let customer = try api.server().customer("u")
     try await api.run {
       let snapshot = try await customer.snapshot()
@@ -251,7 +298,11 @@ import Testing
 
 @Suite struct ServerCustomerTests {
   @Test func registerSendsOnlyDetailsGivenAndTheVisitor() async throws {
-    let api = FakeAPI { _ in .json(#"{"id":"c","externalId":"u","environmentId":"e","createdAt":"2026-10-09T01:47:13Z","created":false}"#) }
+    let api = FakeAPI { _ in
+      .json(
+        #"{"id":"c","externalId":"u","environmentId":"e","createdAt":"2026-10-09T01:47:13Z","created":false}"#
+      )
+    }
     let customer = try api.server().customer("u")
     try await api.run {
       try await customer.register()
@@ -259,7 +310,8 @@ import Testing
       #expect(api.last.body == nil || api.last.body?.isEmpty == true)
       #expect(api.last.header("Content-Type") == nil)
       #expect(api.last.header("Idempotency-Key") != nil)
-      try await customer.register(name: "Ada", metadata: ["team": "a"], visitor: "abcdefghijklmnopq")
+      try await customer.register(
+        name: "Ada", metadata: ["team": "a"], visitor: "abcdefghijklmnopq")
       #expect(api.last.json?.keys.sorted() == ["metadata", "name"])
       #expect(api.last.header("Entitler-Visitor") == "abcdefghijklmnopq")
     }
@@ -269,8 +321,14 @@ import Testing
     let api = FakeAPI { request in
       switch (request.method, request.path) {
       case ("GET", _): .json(Fixture.detail)
-      case ("POST", _): .json(#"{"token":"tok","customer":"u","scopes":["entitlements:read","future:scope"],"expiresAt":"2026-10-09T02:47:13Z"}"#)
-      case ("PUT", _): .json(#"{"customer":"u","track":{"id":"t2","name":"Beta"},"source":"server","previousTrackId":"t1"}"#)
+      case ("POST", _):
+        .json(
+          #"{"token":"tok","customer":"u","scopes":["entitlements:read","future:scope"],"expiresAt":"2026-10-09T02:47:13Z"}"#
+        )
+      case ("PUT", _):
+        .json(
+          #"{"customer":"u","track":{"id":"t2","name":"Beta"},"source":"server","previousTrackId":"t1"}"#
+        )
       default: .json(Fixture.summary)
       }
     }
@@ -283,7 +341,8 @@ import Testing
       #expect(detail.banked["ai_credits"] == 5)
       #expect(detail.selfServe == true)
       #expect(detail.customer.metadata["team"] == "a")
-      let updated = try await customer.update(email: "new@example.com", metadata: ["team": nil, "role": "admin"])
+      let updated = try await customer.update(
+        email: "new@example.com", metadata: ["team": nil, "role": "admin"])
       #expect(updated.externalID == "user_1")
       #expect(api.last.method == "PATCH")
       let metadata = try #require(api.last.json?["metadata"] as? [String: Any])
@@ -320,11 +379,13 @@ import Testing
       #expect(api.last.json?["plan"] as? String == "pro")
       #expect(api.last.json?["selfServe"] as? Bool == true)
       #expect(api.last.json?["override"] == nil)
-      try await customer.subscribe(to: .sku(SKU(connector: "apple", ids: ["productId": "pro"])), when: .end)
+      try await customer.subscribe(
+        to: .sku(SKU(connector: "apple", ids: ["productId": "pro"])), when: .end)
       #expect((api.last.json?["sku"] as? [String: Any])?["connector"] as? String == "apple")
       #expect(api.last.json?["when"] as? String == "end")
       let page = try await customer.checkout(
-        "pro", successURL: URL(string: "https://app.test/ok")!, cancelURL: URL(string: "https://app.test/no")!)
+        "pro", successURL: URL(string: "https://app.test/ok")!,
+        cancelURL: URL(string: "https://app.test/no")!)
       #expect(page.url.absoluteString == "https://checkout.test/s")
       #expect(api.last.json?["successUrl"] as? String == "https://app.test/ok")
       #expect(api.last.json?["selfServe"] as? Bool == true)
@@ -355,8 +416,12 @@ import Testing
 
   @Test func vendorActionsSendSelfServeFalse() async throws {
     let api = FakeAPI { request in
-      if request.path.contains("/meters/") || request.path.contains("/usage/") { return .json(Fixture.usage(outcome: "adjusted")) }
-      if request.path.hasSuffix("checkout") { return .json(#"{"provider":"stripe","url":"https://checkout.test/s"}"#) }
+      if request.path.contains("/meters/") || request.path.contains("/usage/") {
+        return .json(Fixture.usage(outcome: "adjusted"))
+      }
+      if request.path.hasSuffix("checkout") {
+        return .json(#"{"provider":"stripe","url":"https://checkout.test/s"}"#)
+      }
       return .json(Fixture.detail)
     }
     let vendor = try api.server().customer("u").vendor
@@ -369,7 +434,9 @@ import Testing
       try await vendor.undoOverride(product: "app")
       #expect(api.last.path == "/customers/u/subscription/override")
       #expect(api.last.query == "product=app")
-      _ = try await vendor.checkout("team", successURL: URL(string: "https://a.test")!, cancelURL: URL(string: "https://b.test")!, connection: "c1")
+      _ = try await vendor.checkout(
+        "team", successURL: URL(string: "https://a.test")!,
+        cancelURL: URL(string: "https://b.test")!, connection: "c1")
       #expect(api.last.json?["selfServe"] as? Bool == false)
       #expect(api.last.json?["connection"] as? String == "c1")
       try await vendor.addAddOn("sso_addon")
@@ -390,16 +457,24 @@ import Testing
       #expect(api.last.json?["used"] as? Int == 40)
       try await vendor.cancelUsage("u_1")
       #expect(api.last.path == "/customers/u/usage/u_1")
-      await #expect(throws: ArgumentError(message: "Provide the id of the grant.")) { try await vendor.revokeGrant("") }
-      await #expect(throws: ArgumentError(message: "Provide the id of the usage report.")) { try await vendor.cancelUsage("") }
+      await #expect(throws: ArgumentError(message: "Provide the id of the grant.")) {
+        try await vendor.revokeGrant("")
+      }
+      await #expect(throws: ArgumentError(message: "Provide the id of the usage report.")) {
+        try await vendor.cancelUsage("")
+      }
     }
   }
 
   @Test func billingAndProvidersDecode() async throws {
     let api = FakeAPI { request in
       request.path.hasSuffix("billing")
-        ? .json(#"{"provider":"stripe","status":"past_due","sku":{"period":"monthly","connector":"stripe","ids":{"price":"p"},"price":null},"items":1,"drift":{"billedPlan":"pro","heldPlan":null,"observedAt":"2026-10-09T01:47:13Z"},"products":[{"product":"app","status":"active","sku":null,"items":1,"drift":null}]}"#)
-        : .json(#"{"connections":[{"connection":{"id":"c","name":"Stripe","provider":"stripe"},"readAt":"2026-10-09T01:47:13Z","state":{"subscriptions":[{"id":"s","status":"active","billing":true,"period":{"startsAt":"2026-10-01T00:00:00Z","endsAt":"2026-11-01T00:00:00Z"},"trialEndsAt":null,"cancelsAt":null,"items":[{"id":"i","ids":{},"quantity":1,"sale":{"plan":"pro","version":1,"period":"monthly","kind":"plan","product":"app"}}]}],"payments":[{"id":"p","ids":{},"quantity":1,"amount":{"value":100,"currency":"aud"},"status":"partially_refunded","paidAt":"2026-10-01T00:00:00Z","sale":null}]}}],"alerts":[{"id":"a","rule":"held_plan_differs","title":"T","message":"M","facts":{"customer":"u","connection":"c","provider":"google","refusal":"sandbox_builds_turned_off","planId":"p1"},"customer":{"externalId":"u","name":"Ada"},"connection":{"id":"c","name":"Stripe","provider":"stripe"},"openedAt":"2026-10-01T00:00:00Z","seenAt":"2026-10-01T00:00:00Z","resolvedAt":null,"resolvedBy":"person"}]}"#)
+        ? .json(
+          #"{"provider":"stripe","status":"past_due","sku":{"period":"monthly","connector":"stripe","ids":{"price":"p"},"price":null},"items":1,"drift":{"billedPlan":"pro","heldPlan":null,"observedAt":"2026-10-09T01:47:13Z"},"products":[{"product":"app","status":"active","sku":null,"items":1,"drift":null}]}"#
+        )
+        : .json(
+          #"{"connections":[{"connection":{"id":"c","name":"Stripe","provider":"stripe"},"readAt":"2026-10-09T01:47:13Z","state":{"subscriptions":[{"id":"s","status":"active","billing":true,"period":{"startsAt":"2026-10-01T00:00:00Z","endsAt":"2026-11-01T00:00:00Z"},"trialEndsAt":null,"cancelsAt":null,"items":[{"id":"i","ids":{},"quantity":1,"sale":{"plan":"pro","version":1,"period":"monthly","kind":"plan","product":"app"}}]}],"payments":[{"id":"p","ids":{},"quantity":1,"amount":{"value":100,"currency":"aud"},"status":"partially_refunded","paidAt":"2026-10-01T00:00:00Z","sale":null}]}}],"alerts":[{"id":"a","rule":"held_plan_differs","title":"T","message":"M","facts":{"customer":"u","connection":"c","provider":"google","refusal":"sandbox_builds_turned_off","planId":"p1"},"customer":{"externalId":"u","name":"Ada"},"connection":{"id":"c","name":"Stripe","provider":"stripe"},"openedAt":"2026-10-01T00:00:00Z","seenAt":"2026-10-01T00:00:00Z","resolvedAt":null,"resolvedBy":"person"}]}"#
+        )
     }
     let customer = try api.server().customer("u")
     try await api.run {
@@ -434,7 +509,8 @@ import Testing
       #expect(api.requests.get[1].query == "q=acme%20corp&includeTest=true&cursor=n2")
       for try await _ in server.customers.list(cohort: "pro:1", track: "t1") { break }
       #expect(api.last.query == "cohort=pro%3A1&track=t1")
-      let created = try await server.customers.create(id: "new_1", name: "Ada", plan: "pro", idempotencyKey: "create-1")
+      let created = try await server.customers.create(
+        id: "new_1", name: "Ada", plan: "pro", idempotencyKey: "create-1")
       #expect(created.customer.name == "Ada")
       #expect(api.last.json?["externalId"] as? String == "new_1")
       #expect(api.last.json?.keys.sorted() == ["externalId", "name", "plan"])
@@ -444,7 +520,9 @@ import Testing
 
   @Test func planSpaceDecodes() async throws {
     let api = FakeAPI { _ in
-      .json(#"{"customer":"u","asOf":"2026-10-09T01:47:13Z","held":[{"plan":{"id":"p","key":"free","name":"Free","kind":"plan"},"product":{"key":"app","name":"App"},"version":1,"byDefault":true}],"options":[{"plan":{"id":"p2","key":"pro","name":"Pro","kind":"plan"},"product":{"key":"app","name":"App"},"move":"move","from":{"id":"p","key":"free","name":"Free"},"direction":"up","mode":"self-serve","selfServe":true,"disabledReason":null,"when":"now","impact":[{"kind":"Gains","text":"SSO"}],"skus":[]}],\#(Fixture.context)}"#)
+      .json(
+        #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","held":[{"plan":{"id":"p","key":"free","name":"Free","kind":"plan"},"product":{"key":"app","name":"App"},"version":1,"byDefault":true}],"options":[{"plan":{"id":"p2","key":"pro","name":"Pro","kind":"plan"},"product":{"key":"app","name":"App"},"move":"move","from":{"id":"p","key":"free","name":"Free"},"direction":"up","mode":"self-serve","selfServe":true,"disabledReason":null,"when":"now","impact":[{"kind":"Gains","text":"SSO"}],"skus":[]}],\#(Fixture.context)}"#
+      )
     }
     let space = try await api.run { try await api.server().customer("u").planSpace() }
     #expect(space.held.first?.byDefault == true)

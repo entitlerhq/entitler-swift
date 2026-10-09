@@ -20,7 +20,8 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
   ///   - options: Timeouts, retries, the cache and the rest.
   /// - Throws: ``ArgumentError`` when the key is blank or `asOf` is not a valid date.
   public init(key: String, options: EntitlerOptions = EntitlerOptions()) throws {
-    core = try Core(options: options, credential: .server(key: require(key, Messages.key)), visitor: nil)
+    core = try Core(
+      options: options, credential: .server(key: require(key, Messages.key)), visitor: nil)
   }
 
   /// The base URL and the kind of client, never the key.
@@ -63,7 +64,8 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
         customer: try require(event.customer, Messages.customerID),
         feature: try requireFeature(event.feature), amount: event.amount,
         occurredAt: event.occurredAt,
-        idempotencyKey: try validIdempotencyKey(event.idempotencyKey) ?? UUID().uuidString.lowercased())
+        idempotencyKey: try validIdempotencyKey(event.idempotencyKey)
+          ?? UUID().uuidString.lowercased())
     }
     var results: [UsageEventResult] = []
     var recorded = 0
@@ -72,24 +74,29 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
     for start in stride(from: 0, to: prepared.count, by: 500) {
       var request = try Request(
         "POST", ["usage", "events"],
-        body: Body(register: register ? true : nil, events: Array(prepared[start..<min(start + 500, prepared.count)])))
+        body: Body(
+          register: register ? true : nil,
+          events: Array(prepared[start..<min(start + 500, prepared.count)])))
       request.timeout = timeout
       let answer: UsageBatchResult = try await core.call(request)
       results += answer.results.map {
-        UsageEventResult(index: start + $0.index, outcome: $0.outcome, id: $0.id, late: $0.late, error: $0.error)
+        UsageEventResult(
+          index: start + $0.index, outcome: $0.outcome, id: $0.id, late: $0.late, error: $0.error)
       }
       recorded += answer.recorded
       duplicates += answer.duplicates
       errors += answer.errors
     }
-    return UsageBatchResult(results: results, recorded: recorded, duplicates: duplicates, errors: errors)
+    return UsageBatchResult(
+      results: results, recorded: recorded, duplicates: duplicates, errors: errors)
   }
 
   /// The plans on sale to a signed-out visitor, for a pricing page, through the cache.
   ///
   /// - Parameter visitor: The visitor's id from ``newVisitorID()``, kept in a first-party cookie,
   ///   so they see the same experiment arm on every page.
-  public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing {
+  public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing
+  {
     var request = try Request("GET", ["pricing"])
     request.visitor = try validVisitor(visitor)
     request.timeout = timeout
@@ -183,7 +190,10 @@ public struct Customers: Sendable {
   ) -> PagedList<CustomerSummary> {
     let core = core
     let options =
-      [("q", query), ("cohort", cohort), ("track", track), ("includeTest", includeTest ? "true" : nil)]
+      [
+        ("q", query), ("cohort", cohort), ("track", track),
+        ("includeTest", includeTest ? "true" : nil),
+      ]
       .compactMap { name, value in value.map { (name: name, value: $0) } }
     return PagedList { cursor in
       var request = try Request("GET", ["customers"])
@@ -247,11 +257,14 @@ public final class EntitlerClient<Credential: ClientCredential>: Sendable, Custo
 
   init(credential: Entitler.Credential, visitor: String?, options: EntitlerOptions) throws {
     core = try Core(
-      options: options, credential: credential, visitor: try validVisitor(visitor) ?? storedVisitor())
+      options: options, credential: credential,
+      visitor: try validVisitor(visitor) ?? storedVisitor())
   }
 
   /// The signed-in customer. Makes no request.
-  public var me: SignedInCustomer { SignedInCustomer(handle: CustomerHandle(core: core, path: "me")) }
+  public var me: SignedInCustomer {
+    SignedInCustomer(handle: CustomerHandle(core: core, path: "me"))
+  }
 
   /// The visitor id sent on every request, so an experiment's arm stays the same before and after
   /// registration.
@@ -287,7 +300,9 @@ extension EntitlerClient where Credential == TokenCredential {
   /// - Parameters:
   ///   - token: A customer token your server minted with ``ServerCustomer/token(scopes:ttlSeconds:timeout:)``.
   ///   - visitor: A visitor id to use instead of the one the client keeps.
-  public convenience init(token: String, visitor: String? = nil, options: EntitlerOptions = EntitlerOptions())
+  public convenience init(
+    token: String, visitor: String? = nil, options: EntitlerOptions = EntitlerOptions()
+  )
     throws
   {
     let token = try require(token, Messages.customerToken)
@@ -301,7 +316,8 @@ extension EntitlerClient where Credential == TokenCredential {
     options: EntitlerOptions = EntitlerOptions()
   ) throws {
     try self.init(
-      credential: .token(TokenSource(provider: tokenProvider, blankMessage: Messages.customerToken)),
+      credential: .token(
+        TokenSource(provider: tokenProvider, blankMessage: Messages.customerToken)),
       visitor: visitor, options: options)
   }
 }
@@ -318,7 +334,9 @@ extension EntitlerClient where Credential == IdentityCredential {
   ) throws {
     let key = try require(key, Messages.key)
     let token = try require(identityToken, Messages.identityToken)
-    try self.init(credential: .identity(key: key, TokenSource(fixed: token)), visitor: visitor, options: options)
+    try self.init(
+      credential: .identity(key: key, TokenSource(fixed: token)), visitor: visitor, options: options
+    )
   }
 
   /// Creates a client from a publishable key and a provider of identity tokens.
@@ -329,7 +347,8 @@ extension EntitlerClient where Credential == IdentityCredential {
     let key = try require(key, Messages.key)
     try self.init(
       credential: .identity(
-        key: key, TokenSource(provider: identityTokenProvider, blankMessage: Messages.identityToken)),
+        key: key, TokenSource(provider: identityTokenProvider, blankMessage: Messages.identityToken)
+      ),
       visitor: visitor, options: options)
   }
 

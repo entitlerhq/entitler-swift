@@ -73,8 +73,11 @@ public enum GeneratorCommand {
       print("Pass --access-level as public, package or internal.")
       return 1
     }
-    guard let key = (values["--key"] ?? environment["ENTITLER_KEY"]).flatMap({ $0.isEmpty ? nil : $0 }) else {
-      print("Provide an API key with --key or set ENTITLER_KEY. The key needs the plans:read scope.")
+    guard
+      let key = (values["--key"] ?? environment["ENTITLER_KEY"]).flatMap({ $0.isEmpty ? nil : $0 })
+    else {
+      print(
+        "Provide an API key with --key or set ENTITLER_KEY. The key needs the plans:read scope.")
       return 1
     }
     var options = options

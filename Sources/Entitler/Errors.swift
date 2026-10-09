@@ -112,7 +112,9 @@ public struct ConnectionError: Error, Sendable, LocalizedError, CustomStringConv
   public internal(set) var holdID: String?
 
   /// A sentence saying Entitler could not be reached.
-  public var message: String { "Entitler could not be reached: \(underlyingError.localizedDescription)" }
+  public var message: String {
+    "Entitler could not be reached: \(underlyingError.localizedDescription)"
+  }
 
   /// A sentence saying Entitler could not be reached.
   public var errorDescription: String? { message }

@@ -52,7 +52,9 @@ actor TokenSource {
 
   private func refresh() async throws -> String {
     if let refreshing { return try await refreshing.value }
-    guard let provider else { throw EntitlerError.token(TokenError(message: blankMessage, underlyingError: nil)) }
+    guard let provider else {
+      throw EntitlerError.token(TokenError(message: blankMessage, underlyingError: nil))
+    }
     let blankMessage = blankMessage
     let task = Task<String, any Error> {
       let answer: String
@@ -62,7 +64,9 @@ actor TokenSource {
         throw CancellationError()
       } catch {
         throw EntitlerError.token(
-          TokenError(message: "The token provider failed: \(error.localizedDescription)", underlyingError: error))
+          TokenError(
+            message: "The token provider failed: \(error.localizedDescription)",
+            underlyingError: error))
       }
       let token = answer.trimmed
       guard !token.isEmpty else {
@@ -70,7 +74,9 @@ actor TokenSource {
       }
       guard JWT.claims(token) != nil else {
         throw EntitlerError.token(
-          TokenError(message: "The token provider answered a token that is not a JWT.", underlyingError: nil))
+          TokenError(
+            message: "The token provider answered a token that is not a JWT.", underlyingError: nil)
+        )
       }
       return token
     }
@@ -78,7 +84,9 @@ actor TokenSource {
     defer { refreshing = nil }
     let token = try await task.value
     current = token
-    expiresAt = (JWT.claims(token)?["exp"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+    expiresAt = (JWT.claims(token)?["exp"] as? NSNumber).map {
+      Date(timeIntervalSince1970: $0.doubleValue)
+    }
     return token
   }
 }

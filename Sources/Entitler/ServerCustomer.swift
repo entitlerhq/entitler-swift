@@ -82,7 +82,9 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// The customer in full, with a page of their usage log.
   ///
   /// - Parameter cursor: The ``Page/next`` of the usage log, for the page after it.
-  public func details(cursor: String? = nil, timeout: TimeInterval? = nil) async throws -> CustomerDetail {
+  public func details(cursor: String? = nil, timeout: TimeInterval? = nil) async throws
+    -> CustomerDetail
+  {
     var request = try handle.request("GET", [], timeout: timeout)
     if let cursor { request.query = [("cursor", cursor)] }
     return try await handle.core.call(request)
@@ -106,7 +108,9 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// Deletes the customer, and with `erase` erases their personal data and usage too.
   @discardableResult
-  public func delete(erase: Bool = false, idempotencyKey: String? = nil, timeout: TimeInterval? = nil)
+  public func delete(
+    erase: Bool = false, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  )
     async throws -> CustomerSummary
   {
     var request = try handle.request("DELETE", [], idempotencyKey: idempotencyKey, timeout: timeout)
@@ -132,7 +136,9 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// Puts the customer on a track, or back on All customers with `nil`.
   @discardableResult
-  public func setTrack(_ trackID: String?, idempotencyKey: String? = nil, timeout: TimeInterval? = nil)
+  public func setTrack(
+    _ trackID: String?, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  )
     async throws -> CustomerTrack
   {
     struct Body: Encodable {
@@ -148,7 +154,8 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
       }
     }
     return try await handle.call(
-      "PUT", ["track"], body: Body(trackID: trackID), idempotencyKey: idempotencyKey, timeout: timeout)
+      "PUT", ["track"], body: Body(trackID: trackID), idempotencyKey: idempotencyKey,
+      timeout: timeout)
   }
 
   /// Subscribes the customer to a plan, or moves them, as they would choose themselves.
@@ -162,7 +169,8 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
     idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> CustomerDetail {
     try await Billing(handle: handle, selfServe: true).subscribe(
-      plan, period: period, when: when, override: nil, idempotencyKey: idempotencyKey, timeout: timeout)
+      plan, period: period, when: when, override: nil, idempotencyKey: idempotencyKey,
+      timeout: timeout)
   }
 
   /// Opens the payment provider's checkout for a plan, as the customer would choose themselves.
@@ -224,7 +232,9 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// Removes an add-on the customer holds.
   @discardableResult
-  public func removeAddOn(_ plan: String, idempotencyKey: String? = nil, timeout: TimeInterval? = nil)
+  public func removeAddOn(
+    _ plan: String, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  )
     async throws -> CustomerDetail
   {
     try await handle.call(
@@ -249,7 +259,9 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// Opens the payment provider's page where the customer updates payment details and sees
   /// invoices.
-  public func billingPortal(returnURL: URL, timeout: TimeInterval? = nil) async throws -> ProviderPage {
+  public func billingPortal(returnURL: URL, timeout: TimeInterval? = nil) async throws
+    -> ProviderPage
+  {
     struct Body: Encodable {
       var returnUrl: URL
     }
@@ -277,7 +289,8 @@ public struct Vendor: Sendable {
     idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> CustomerDetail {
     try await Billing(handle: handle, selfServe: false).subscribe(
-      plan, period: period, when: when, override: nil, idempotencyKey: idempotencyKey, timeout: timeout)
+      plan, period: period, when: when, override: nil, idempotencyKey: idempotencyKey,
+      timeout: timeout)
   }
 
   /// Moves the customer in Entitler only, while the payment provider keeps billing the plan they
@@ -378,7 +391,9 @@ public struct Vendor: Sendable {
 
   /// Revokes a grant. It stops counting now and stays in the customer's history.
   @discardableResult
-  public func revokeGrant(_ grantID: String, idempotencyKey: String? = nil, timeout: TimeInterval? = nil)
+  public func revokeGrant(
+    _ grantID: String, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  )
     async throws -> CustomerDetail
   {
     try await handle.call(
@@ -404,13 +419,16 @@ public struct Vendor: Sendable {
       var used: Int64
     }
     return try await handle.call(
-      "PUT", ["meters", requireFeature(key)], body: Body(used: used), idempotencyKey: idempotencyKey,
+      "PUT", ["meters", requireFeature(key)], body: Body(used: used),
+      idempotencyKey: idempotencyKey,
       timeout: timeout)
   }
 
   /// Cancels a usage report: a correction that takes its amount off the meter.
   @discardableResult
-  public func cancelUsage(_ usageID: String, idempotencyKey: String? = nil, timeout: TimeInterval? = nil)
+  public func cancelUsage(
+    _ usageID: String, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  )
     async throws -> UsageResult
   {
     try await handle.call(
@@ -484,7 +502,9 @@ struct Billing {
       timeout: timeout)
   }
 
-  func setAddOnQuantity(_ plan: String, quantity: Int, idempotencyKey: String?, timeout: TimeInterval?)
+  func setAddOnQuantity(
+    _ plan: String, quantity: Int, idempotencyKey: String?, timeout: TimeInterval?
+  )
     async throws -> CustomerDetail
   {
     var body = try Body(nil, selfServe: selfServe)

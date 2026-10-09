@@ -139,7 +139,9 @@ final class Core: Sendable, CustomReflectable {
     let key = try await cacheKey(request)
     let kept = await cache.entry(forKey: key)
     if let kept, let maxAge = kept.maxAge, hooks.now().timeIntervalSince(kept.receivedAt) < maxAge {
-      let written = await request.customer.asyncMap { await writes.wrote(to: $0, since: kept.receivedAt) }
+      let written = await request.customer.asyncMap {
+        await writes.wrote(to: $0, since: kept.receivedAt)
+      }
       if written != true { return (Response(status: 200, body: kept.body), false) }
     }
     do {
@@ -158,13 +160,17 @@ final class Core: Sendable, CustomReflectable {
       await keep(response, body: response.body, etag: response.etag, key: key, in: cache)
       return (response, false)
     } catch let error as EntitlerError where error.isUnreachable {
-      guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor else { throw error }
+      guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor else {
+        throw error
+      }
       options.onError?(error)
       return (Response(status: 200, body: kept.body), true)
     }
   }
 
-  private func keep(_ response: Response, body: Data, etag: String?, key: String, in cache: any CacheStore) async {
+  private func keep(
+    _ response: Response, body: Data, etag: String?, key: String, in cache: any CacheStore
+  ) async {
     guard !response.noStore, etag != nil || response.maxAge != nil else { return }
     if let maxAge = response.maxAge { await writes.noteMaxAge(maxAge) }
     await cache.setEntry(
@@ -178,7 +184,8 @@ final class Core: Sendable, CustomReflectable {
     case .server(let key):
       principal = key
     case .token(let source):
-      principal = JWT.principal(try await source.token(now: Hooks.current.now()), claims: ["iss", "eid", "sub"])
+      principal = JWT.principal(
+        try await source.token(now: Hooks.current.now()), claims: ["iss", "eid", "sub"])
     case .identity(let key, let source):
       let token = try await source.token(now: Hooks.current.now())
       principal = key + "\n" + JWT.principal(token, claims: ["iss", "sub"])
@@ -194,7 +201,9 @@ final class Core: Sendable, CustomReflectable {
   func url(for request: Request) -> URL {
     var text = options.base + request.path
     if !request.query.isEmpty {
-      text += "?" + request.query.map { "\($0.name.componentEncoded)=\($0.value.componentEncoded)" }
+      text +=
+        "?"
+        + request.query.map { "\($0.name.componentEncoded)=\($0.value.componentEncoded)" }
         .joined(separator: "&")
     }
     return URL(string: text)!
@@ -217,7 +226,8 @@ final class Core: Sendable, CustomReflectable {
 
   private func exchange(_ request: Request, ifNoneMatch etag: String?) async throws -> Response {
     let hooks = Hooks.current
-    let idempotencyKey = request.method == "GET" ? nil : request.idempotencyKey ?? UUID().uuidString.lowercased()
+    let idempotencyKey =
+      request.method == "GET" ? nil : request.idempotencyKey ?? UUID().uuidString.lowercased()
     let timeout = request.timeout ?? options.timeout
     var retries = 0
     var refreshed = false
@@ -226,13 +236,17 @@ final class Core: Sendable, CustomReflectable {
       var urlRequest = URLRequest(url: url(for: request), timeoutInterval: timeout)
       urlRequest.httpMethod = request.method
       urlRequest.httpBody = request.body
-      for (name, value) in headers(request, token: token, idempotencyKey: idempotencyKey, etag: etag) {
+      for (name, value) in headers(
+        request, token: token, idempotencyKey: idempotencyKey, etag: etag)
+      {
         urlRequest.setValue(value, forHTTPHeaderField: name)
       }
       let failure: EntitlerError
       do {
-        let (body, http) = try await attempt(urlRequest, timeout: timeout, idempotencyKey: idempotencyKey)
-        if http.statusCode == 401, !refreshed, let token, let fresh = try await refresh(replacing: token),
+        let (body, http) = try await attempt(
+          urlRequest, timeout: timeout, idempotencyKey: idempotencyKey)
+        if http.statusCode == 401, !refreshed, let token,
+          let fresh = try await refresh(replacing: token),
           fresh != token
         {
           refreshed = true
@@ -246,7 +260,8 @@ final class Core: Sendable, CustomReflectable {
           return response
         }
         let error = apiError(http, body: body, idempotencyKey: idempotencyKey, now: hooks.now())
-        guard [408, 429, 500, 502, 503, 504].contains(http.statusCode), retries < options.maxRetries else {
+        guard [408, 429, 500, 502, 503, 504].contains(http.statusCode), retries < options.maxRetries
+        else {
           throw EntitlerError.api(error)
         }
         if let retryAfter = error.retryAfter {
@@ -274,7 +289,8 @@ final class Core: Sendable, CustomReflectable {
     let session = options.session
     let hooks = Hooks.current
     do {
-      let (body, response) = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) { group in
+      let (body, response) = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) {
+        group in
         group.addTask { try await session.data(for: request) }
         group.addTask {
           try await hooks.deadline(timeout)
@@ -282,12 +298,15 @@ final class Core: Sendable, CustomReflectable {
         }
         defer { group.cancelAll() }
         guard let first = try await group.next(), let answer = first else {
-          throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
+          throw EntitlerError.timeout(
+            TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
         }
         return answer
       }
       guard let http = response as? HTTPURLResponse else {
-        throw EntitlerError.connection(ConnectionError(underlyingError: URLError(.badServerResponse), idempotencyKey: idempotencyKey))
+        throw EntitlerError.connection(
+          ConnectionError(
+            underlyingError: URLError(.badServerResponse), idempotencyKey: idempotencyKey))
       }
       return (body, http)
     } catch let error as EntitlerError {
@@ -297,11 +316,14 @@ final class Core: Sendable, CustomReflectable {
       if let error = error as? URLError, error.code == .timedOut {
         throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
       }
-      throw EntitlerError.connection(ConnectionError(underlyingError: error, idempotencyKey: idempotencyKey))
+      throw EntitlerError.connection(
+        ConnectionError(underlyingError: error, idempotencyKey: idempotencyKey))
     }
   }
 
-  private func headers(_ request: Request, token: String?, idempotencyKey: String?, etag: String?) -> [String: String] {
+  private func headers(_ request: Request, token: String?, idempotencyKey: String?, etag: String?)
+    -> [String: String]
+  {
     var headers = ["Accept": "application/json", "User-Agent": userAgent]
     if let token { headers["Authorization"] = "Bearer \(token)" }
     if case .identity(let key, _) = credential, let token {
@@ -319,7 +341,8 @@ final class Core: Sendable, CustomReflectable {
   private func currentToken() async throws -> String {
     switch credential {
     case .server(let key): key
-    case .token(let source), .identity(_, let source): try await source.token(now: Hooks.current.now())
+    case .token(let source), .identity(_, let source):
+      try await source.token(now: Hooks.current.now())
     }
   }
 
@@ -330,7 +353,9 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func apiError(_ http: HTTPURLResponse, body: Data, idempotencyKey: String?, now: Date) -> APIError {
+  private func apiError(_ http: HTTPURLResponse, body: Data, idempotencyKey: String?, now: Date)
+    -> APIError
+  {
     struct Body: Decodable {
       struct Detail: Decodable {
         let code: ErrorCode?
@@ -347,7 +372,9 @@ final class Core: Sendable, CustomReflectable {
       code: detail?.code ?? .httpError,
       message: detail?.message ?? "Entitler request failed with HTTP \(http.statusCode).",
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
-      retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap { retryAfter($0, now: now) },
+      retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
+        retryAfter($0, now: now)
+      },
       idempotencyKey: idempotencyKey,
       payment: detail?.payment,
       listingGaps: detail?.listingGaps ?? [],
@@ -377,7 +404,9 @@ extension Response {
       status: http.statusCode,
       body: body,
       etag: http.value(forHTTPHeaderField: "ETag"),
-      maxAge: directives.first { $0.hasPrefix("max-age=") }.flatMap { TimeInterval($0.dropFirst(8)) },
+      maxAge: directives.first { $0.hasPrefix("max-age=") }.flatMap {
+        TimeInterval($0.dropFirst(8))
+      },
       noStore: directives.contains("no-store"))
   }
 }
@@ -406,5 +435,6 @@ let userAgent: String = {
     let system = "unknown"
   #endif
   let version = ProcessInfo.processInfo.operatingSystemVersion
-  return "entitler-swift/\(entitlerSDKVersion) \(system)/\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+  return
+    "entitler-swift/\(entitlerSDKVersion) \(system)/\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
 }()
