@@ -10,8 +10,8 @@ let customer = try server.customer("billing-\(UUID().uuidString.prefix(8).lowerc
 try await customer.register(name: "Mary Jackson")
 
 do {
-  let space = try await customer.planSpace()
-  for option in space.options where option.selfServe {
+  let plans = try await customer.plans()
+  for option in plans.options where option.selfServe {
     print("Could move to \(option.plan.name) (\(option.direction.rawValue))")
   }
 

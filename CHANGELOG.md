@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows
 
 - `EntitlerServer`, built from a secret key, and `EntitlerClient`, built from a customer token or
   a publishable key and an identity token, with token providers that refresh.
-- One `Customer` protocol for both: checks, `isEntitled(to:default:)`, entitlements, plan space,
+- One `Customer` protocol for both: checks, `isEntitled(to:default:)`, entitlements, `plans()`,
   pricing, usage with gate and observe modes, holds, `withHold`, and snapshots.
 - Registration, details, tokens, tracks, self-serve billing and vendor actions on `ServerCustomer`.
 - Usage batches, pricing, the feature list, scopes and snapshot keys on the server.

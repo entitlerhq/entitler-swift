@@ -12,7 +12,7 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 ```
 
 When Entitler cannot answer (no connection, a timeout, an outage, a missing feature), the call
-answers `default` and passes the error to `onError`. A stale answer from the cache counts as an
+answers `default` and passes the error to `onError`; so does a blank key, which never traps. A stale answer from the cache counts as an
 answer (see [reliability](reliability.md)). Cancelling the task answers `default` without calling
 `onError`.
 
@@ -53,4 +53,4 @@ let seats = entitlements[Features.teamSeats]?.value
 Groups are in the list with Entitler's decision, so `has` never expands a group itself. `has`
 answers `false` for a feature the list does not hold.
 
-Checks, entitlement lists, plan space and pricing go through the [answer cache](reliability.md).
+Checks, entitlement lists, the customer's plans and pricing go through the [answer cache](reliability.md).

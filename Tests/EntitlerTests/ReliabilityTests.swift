@@ -100,7 +100,7 @@ import Testing
     do {
       _ = try await api.run {
         try await api.server { $0.maxRetries = 1 }.customer("u").recordUsage(
-          of: "ai_credits", amount: 1, timeout: 0.05)
+          of: Feature<Metered>("ai_credits"), amount: 1, timeout: 0.05)
       }
       Issue.record("Expected an error")
     } catch EntitlerError.timeout(let error) {
@@ -142,7 +142,8 @@ import Testing
     let api = FakeAPI { _ in .json(Fixture.usage()) }
     let customer = try api.server().customer("u")
     _ = try await api.run {
-      try await customer.recordUsage(of: "ai_credits", amount: 1, idempotencyKey: "job-42")
+      try await customer.recordUsage(
+        of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "job-42")
     }
     #expect(api.last.header("Idempotency-Key") == "job-42")
     for bad in ["", String(repeating: "a", count: 201), "tab\there", "é"] {
@@ -150,7 +151,8 @@ import Testing
         throws: ArgumentError(
           message: "Pass idempotencyKey as 1 to 200 printable ASCII characters.")
       ) {
-        try await customer.recordUsage(of: "ai_credits", amount: 1, idempotencyKey: bad)
+        try await customer.recordUsage(
+          of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: bad)
       }
     }
     #expect(api.count == 1)
@@ -187,7 +189,7 @@ import Testing
       _ = try await server.customer("u").check("sso")
       #expect(api.count == 2)
       api.advance(1)
-      _ = try await server.customer("u").recordUsage(of: "ai_credits", amount: 1)
+      _ = try await server.customer("u").recordUsage(of: Feature<Metered>("ai_credits"), amount: 1)
       _ = try await server.customer("u").check("sso")
       #expect(api.count == 4)
       #expect(api.last.header("If-None-Match") == "\"e1\"")
@@ -219,7 +221,7 @@ import Testing
     } catch EntitlerError.api(let error) {
       #expect(error.status == 304)
       #expect(error.code == .httpError)
-      #expect(error.message == "Entitler request failed with HTTP 304.")
+      #expect(error.message == "Entitler answered with HTTP 304.")
     }
   }
 
@@ -280,35 +282,44 @@ import Testing
     #expect(store.keys.allSatisfy { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
   }
 
-  @Test func refreshedTokensKeepTheirCustomersAnswers() async throws {
+  @Test func refreshedTokensHaveTheirOwnEntriesButServeStaleWhenTheProviderFails() async throws {
     let tokens = Box(0)
-    let api = FakeAPI { _ in .json(Fixture.check(), headers: ["Cache-Control": "max-age=300"]) }
+    let api = FakeAPI { _ in
+      .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+    }
+    struct Offline: Error {}
+    let errors = Box(0)
     let client = try EntitlerClient(
       tokenProvider: {
         let n = tokens.with {
           $0 += 1
           return $0
         }
+        if n == 3 { throw Offline() }
         return makeJWT([
-          "iss": "entitler", "eid": "env", "sub": "user_1", "exp": 1_800_000_100 + n * 50, "n": n,
+          "sub": "user_1", "iat": 1_800_000_000, "exp": 1_800_000_200 + n * 200, "n": n,
         ])
-      }, options: api.options())
+      }, options: api.options { $0.onError = { _ in errors.with { $0 += 1 } } })
     try await api.run {
       _ = try await client.me.check("sso")
-      api.advance(95)
+      api.advance(350)
       _ = try await client.me.check("sso")
+      #expect(api.count == 2)
+      api.advance(200)
+      let stale = try await client.me.check("sso")
+      #expect(stale.stale)
     }
-    #expect(tokens.get == 2)
-    #expect(api.count == 1)
+    #expect(tokens.get == 3)
+    #expect(errors.get == 1)
   }
 
   @Test func memoryStoreEvictsTheLeastRecentlyUsed() async {
     let store = MemoryCacheStore(capacity: 2)
-    let entry = CacheEntry(body: Data(), etag: nil, maxAge: nil, receivedAt: Date())
-    await store.setEntry(entry, forKey: "a")
-    await store.setEntry(entry, forKey: "b")
+    let entry = CacheEntry(body: "{}", etag: nil, cacheControl: nil, age: nil, receivedAt: Date())
+    await store.setEntry(entry, forKey: "a", timeToLive: 1)
+    await store.setEntry(entry, forKey: "b", timeToLive: 1)
     _ = await store.entry(forKey: "a")
-    await store.setEntry(entry, forKey: "c")
+    await store.setEntry(entry, forKey: "c", timeToLive: 1)
     #expect(await store.entry(forKey: "a") != nil)
     #expect(await store.entry(forKey: "b") == nil)
     #expect(await store.entry(forKey: "c") != nil)
@@ -331,7 +342,7 @@ import Testing
   }
 
   @Test func staleAnswersStandInWhenUnreachable() async throws {
-    let errors = Box<[EntitlerError]>([])
+    let errors = Box<[any Error]>([])
     let api = FakeAPI(replies: [
       .json(Fixture.check(), headers: ["ETag": "\"e\""]), .error(503, code: "unavailable"),
       .error(503, code: "unavailable"), .error(503, code: "unavailable"),
@@ -388,7 +399,7 @@ import Testing
       try await api.run {
         switch index {
         case 0: _ = try await customer.entitlements()
-        case 1: _ = try await customer.planSpace()
+        case 1: _ = try await customer.plans()
         case 2: _ = try await customer.pricing()
         default: _ = try await customer.check(Feature<Metered>("ai_credits"))
         }
@@ -397,7 +408,7 @@ import Testing
     api.answer { _ in .failure(.notConnectedToInternet) }
     let stale = try await api.run {
       [
-        try await customer.entitlements().stale, try await customer.planSpace().stale,
+        try await customer.entitlements().stale, try await customer.plans().stale,
         try await customer.pricing().stale,
         try await customer.check(Feature<Metered>("ai_credits")).stale,
       ]
@@ -447,7 +458,7 @@ import Testing
       _ = try await client.me.check("sso")
       _ = try await client.me.check("sso")
       #expect(calls.get == 1)
-      api.advance(41)
+      api.advance(51)
       _ = try await client.me.check("sso")
       #expect(calls.get == 2)
     }
@@ -601,9 +612,9 @@ final class RecordingStore: CacheStore {
   let written = Box<Set<String>>([])
   var keys: Set<String> { written.get }
   func entry(forKey key: String) async -> CacheEntry? { await inner.entry(forKey: key) }
-  func setEntry(_ entry: CacheEntry, forKey key: String) async {
+  func setEntry(_ entry: CacheEntry, forKey key: String, timeToLive: TimeInterval) async {
     written.with { _ = $0.insert(key) }
-    await inner.setEntry(entry, forKey: key)
+    await inner.setEntry(entry, forKey: key, timeToLive: timeToLive)
   }
 }
 

@@ -123,7 +123,7 @@ private struct SnapshotClaims: Decodable {
   let exp: Int64
 }
 
-/// Verifies an offline snapshot from ``Customer/snapshot(ttlSeconds:timeout:)`` with no request.
+/// Verifies an offline snapshot from ``Customer/snapshot(ttlSeconds:idempotencyKey:timeout:)`` with no request.
 ///
 /// ```swift
 /// let snapshot = try verifySnapshot(token, expecting: SnapshotExpectation(
@@ -149,7 +149,9 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
     let headerData = Base64URL.decode(segments[0]),
     let signature = Base64URL.decode(segments[2]),
     let header = try? JSON.decoder().decode(SnapshotHeader.self, from: headerData),
-    header.typ == "entitlements+jwt", header.alg == "ES256"
+    header.typ == "entitlements+jwt", header.alg == "ES256",
+    let fields = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
+    fields["crit"] == nil
   else { throw malformed }
 
   guard let key = expected.keys.first(where: { $0.kid == header.kid }) else {
@@ -171,6 +173,8 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
     throw fail(.invalid, "This snapshot was not issued by \(expected.issuer).")
   }
   let now = expected.now ?? Hooks.current.now()
+  let instants = -62_135_596_800...253_402_300_799 as ClosedRange<Int64>
+  guard instants.contains(claims.iat), instants.contains(claims.exp) else { throw malformed }
   let issuedAt = Date(timeIntervalSince1970: TimeInterval(claims.iat))
   let expiresAt = Date(timeIntervalSince1970: TimeInterval(claims.exp))
   guard issuedAt <= now.addingTimeInterval(TimeInterval(expected.clockSkewSeconds)) else {

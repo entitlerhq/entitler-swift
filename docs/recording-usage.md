@@ -1,7 +1,8 @@
 # Recording usage
 
-Usage is recorded on metered features, in whole numbers of the feature's unit from 1 to 2^53 − 1.
-Other features answer `400 not_metered`.
+Usage is recorded on metered features, in whole numbers of the feature's unit from 1 to 2^53 − 1;
+the SDK refuses other amounts before any request. Usage methods take only `Feature<Metered>`
+constants: declare a plain key as `Feature<Metered>("ai_credits")`.
 
 ## Modes
 
@@ -63,19 +64,33 @@ Read one back with `hold(id:)`.
 
 ## `withHold`
 
-`withHold` holds an amount, runs your work, and settles what the work used:
+`withHold` holds an amount, runs your work, and settles the amount the work reports. It answers
+the work's own result:
 
 ```swift
-let used = try await customer.withHold(of: Features.aiCredits, amount: 500) { hold in
-  try await summarise(document).tokens
+let summary = try await customer.withHold(of: Features.aiCredits, amount: 500) { hold in
+  let answer = try await summarise(document)
+  try hold.use(answer.tokens)
+  return answer.summary
 }
 ```
 
-- A refused hold never runs the work and throws `EntitlerError.usageRefused(answer)`.
-- When the work throws, the hold is released and the error propagates. A failed release goes to
-  `onError`, since the hold expires on its own.
-- An amount past the hold is recorded in observe mode, with the hold's key plus `:excess`.
-- A failed settlement throws an error whose `holdID` names the hold, so you can settle it again.
+- `hold.use(_:)` reports the total the work really used; a later call replaces an earlier one.
+  When the work never reports an amount, the held amount is settled.
+- The work runs only when the hold is placed, or replays a hold that is still open. A refused hold,
+  or a replay of one already settled, released or expired, throws
+  `EntitlerError.usageRefused(answer)` without running it.
+- An amount past the hold is recorded in observe mode under the hold's key plus `:excess`; so the
+  `withHold` key is at most 193 characters. When the hold expired while the work ran, the whole
+  reported amount is recorded that way, since the work happened.
+- When the work throws or the task is cancelled, the hold is released (outside the cancelled task)
+  and the error propagates. A failed release goes to `onError`, since the hold expires on its own.
+- When settling or recording the excess fails, the call throws
+  `EntitlerError.usageSettlement(error)`, whose `holdID`, `amount`, `excess` and `result` let you
+  keep the output and settle again before the hold expires.
+
+The accounting happens exactly once per key, but the work does not: two callers using the same key
+at the same time may both run it. Coordinate the work yourself when it must run once.
 
 ## Batches from the server
 
@@ -88,7 +103,11 @@ print(result.recorded, result.duplicates, result.errors)
 ```
 
 Batches are recorded in observe mode, in requests of at most 500 events, and answer one result
-per event in input order.
+per event in input order, each with its idempotency key. A request that fails after its retries
+answers its events with outcome `error` (code `connection_failed` or `timed_out` when no answer
+arrived) and the next request still goes; the call throws only for invalid arguments. Resend the
+events answered `error` with the same keys: keys derived from your own unit of work make any
+resend safe. Pass `idempotencyKey:` for the batch, and each request sends it plus `:<index>`.
 
 ## Reading usage
 

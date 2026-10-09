@@ -239,7 +239,7 @@ let sampleCatalogue = [
     }
     var (code, lines) = await run(["generate", "--out", temporaryFile()], api: api)
     #expect(code == 1)
-    #expect(lines == ["Entitler request failed: The key needs plans:read. (scope_required)"])
+    #expect(lines == ["Entitler request failed: The key needs plans:read (scope_required)."])
     api.answer { _ in .failure(.cannotConnectToHost) }
     (code, lines) = await run(["generate", "--base-url", "https://\(api.host)"], api: api)
     #expect(code == 1)

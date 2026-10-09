@@ -15,14 +15,13 @@ try await customer.register(name: "Katherine Johnson")
 
 do {
   let document = "Orbital mechanics for the Friendship 7 flight."
-  var summary = ""
   do {
-    let used = try await customer.withHold(of: Features.aiCredits, amount: 10) { _ in
+    let summary = try await customer.withHold(of: Features.aiCredits, amount: 10) { hold in
       let answer = try await summarise(document)
-      summary = answer.summary
-      return answer.credits
+      try hold.use(answer.credits)
+      return answer.summary
     }
-    print("Summary: \(summary) (\(used) credits)")
+    print("Summary: \(summary)")
   } catch EntitlerError.usageRefused(let answer) {
     print("Not enough credits: \(answer.refusal?.rawValue ?? "refused")")
   }

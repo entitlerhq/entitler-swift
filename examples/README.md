@@ -13,7 +13,7 @@ in `ENTITLER_KEY`, from this directory:
   report. `ENTITLER_KEY=sk_… swift run metered-work`
 - `offline`: fetches a snapshot and the keys, then verifies the snapshot offline and checks a
   feature. `ENTITLER_KEY=sk_… swift run offline`
-- `billing`: self-serve subscription, plan space, a checkout that handles `409 stale`, and a vendor
+- `billing`: self-serve subscription, the plans the customer can move to, a checkout that handles `409 stale`, and a vendor
   grant. `ENTITLER_KEY=sk_… swift run billing`
 - `generated-features`: a constants file from `entitler generate`, and code that uses it.
   `ENTITLER_KEY=sk_… swift run generated-features`

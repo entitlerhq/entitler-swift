@@ -62,7 +62,7 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// - Parameters:
   ///   - name: The customer's name.
   ///   - email: The customer's email address.
-  ///   - metadata: Your metadata, merged into what Entitler holds.
+  ///   - metadata: Your metadata, merged into what Entitler holds; a `nil` value removes that key.
   ///   - visitor: The visitor id the person had while signed out, so they keep their
   ///     experiment arm.
   ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
@@ -70,13 +70,13 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func register(
-    name: String? = nil, email: String? = nil, metadata: [String: String]? = nil,
+    name: String? = nil, email: String? = nil, metadata: [String: String?]? = nil,
     visitor: String? = nil, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> RegisteredCustomer {
     struct Body: Encodable {
       var name: String?
       var email: String?
-      var metadata: [String: String]?
+      var metadata: [String: String?]?
     }
     let given = name != nil || email != nil || metadata != nil
     var request = try handle.request(
@@ -132,16 +132,19 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// - Parameters:
   ///   - scopes: The scopes to hold, from `entitlements:read`, `usage:read` and `usage:write`.
   ///   - ttlSeconds: How long it lasts, 60 to 3600 (the API's default is an hour).
+  ///   - idempotencyKey: Sent as `Idempotency-Key`; minting writes nothing.
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
-  public func token(scopes: [Scope]? = nil, ttlSeconds: Int? = nil, timeout: TimeInterval? = nil)
-    async throws -> IssuedCustomerToken
-  {
+  public func token(
+    scopes: [Scope]? = nil, ttlSeconds: Int? = nil, idempotencyKey: String? = nil,
+    timeout: TimeInterval? = nil
+  ) async throws -> IssuedCustomerToken {
     struct Body: Encodable {
       var scopes: [Scope]?
       var ttlSeconds: Int?
     }
     return try await handle.call(
-      "POST", ["tokens"], body: Body(scopes: scopes, ttlSeconds: ttlSeconds), timeout: timeout)
+      "POST", ["tokens"], body: Body(scopes: scopes, ttlSeconds: ttlSeconds),
+      idempotencyKey: idempotencyKey, changesAnswers: false, timeout: timeout)
   }
 
   /// Puts the customer on a track, or back on All customers with `nil`.
@@ -274,14 +277,15 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// Opens the payment provider's page where the customer updates payment details and sees
   /// invoices.
-  public func billingPortal(returnURL: URL, timeout: TimeInterval? = nil) async throws
-    -> ProviderPage
-  {
+  public func billingPortal(
+    returnURL: URL, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  ) async throws -> ProviderPage {
     struct Body: Encodable {
       var returnUrl: URL
     }
     return try await handle.call(
-      "POST", ["billing-portal"], body: Body(returnUrl: returnURL), timeout: timeout)
+      "POST", ["billing-portal"], body: Body(returnUrl: returnURL), idempotencyKey: idempotencyKey,
+      changesAnswers: false, timeout: timeout)
   }
 
   /// The customer's subscriptions and payments as each provider last reported them.
@@ -312,11 +316,11 @@ public struct Vendor: Sendable {
   /// held.
   @discardableResult
   public func override(
-    to plan: String, period: String? = nil, when: ChangeTiming? = nil,
-    idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+    to plan: String, period: String? = nil, idempotencyKey: String? = nil,
+    timeout: TimeInterval? = nil
   ) async throws -> CustomerDetail {
     try await Billing(handle: handle, selfServe: false).subscribe(
-      .plan(plan), period: period, when: when, override: true, idempotencyKey: idempotencyKey,
+      .plan(plan), period: period, when: nil, override: true, idempotencyKey: idempotencyKey,
       timeout: timeout)
   }
 
@@ -427,19 +431,11 @@ public struct Vendor: Sendable {
     _ feature: Feature<Metered>, to used: Int64, idempotencyKey: String? = nil,
     timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
-    try await setMeter(feature.key, to: used, idempotencyKey: idempotencyKey, timeout: timeout)
-  }
-
-  /// Sets how much of the metered feature with this key the customer has used this period.
-  @discardableResult
-  public func setMeter(
-    _ key: String, to used: Int64, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
-  ) async throws -> UsageResult {
     struct Body: Encodable {
       var used: Int64
     }
     return try await handle.call(
-      "PUT", ["meters", requireFeature(key)], body: Body(used: used),
+      "PUT", ["meters", requireFeature(feature.key)], body: Body(used: used),
       idempotencyKey: idempotencyKey,
       timeout: timeout)
   }
@@ -506,7 +502,8 @@ struct Billing {
     body.cancelUrl = cancelURL
     body.connection = connection
     return try await handle.call(
-      "POST", ["checkout"], body: body, idempotencyKey: idempotencyKey, timeout: timeout)
+      "POST", ["checkout"], body: body, idempotencyKey: idempotencyKey, changesAnswers: false,
+      timeout: timeout)
   }
 
   func addAddOn(

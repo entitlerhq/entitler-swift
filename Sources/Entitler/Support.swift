@@ -137,6 +137,13 @@ enum Base64URL {
   }
 }
 
+let maxAmount: Int64 = 9_007_199_254_740_991
+
+func validAmount(_ amount: Int64) throws -> Int64 {
+  guard (1...maxAmount).contains(amount) else { throw ArgumentError(message: Messages.amount) }
+  return amount
+}
+
 func require(_ value: String, _ message: String) throws -> String {
   let trimmed = value.trimmed
   guard !trimmed.isEmpty else { throw ArgumentError(message: message) }
@@ -156,4 +163,9 @@ enum Messages {
   static let visitor = "Pass visitor as an id of 16 to 64 letters, numbers, hyphens or underscores."
   static let asOf = "Pass asOf as a valid date."
   static let idempotencyKey = "Pass idempotencyKey as 1 to 200 printable ASCII characters."
+  static let holdKey = "Pass idempotencyKey as 1 to 193 printable ASCII characters."
+  static let dots = "Pass an id that is not made only of dots."
+  static let amount = "Pass amount as a whole number from 1 to 9007199254740991."
+  static let settledAmount = "Pass amount as a whole number from 0 to the held amount."
+  static let amountUsed = "Pass the amount used as a whole number of 0 or more."
 }

@@ -12,6 +12,7 @@ struct Recorded: Sendable {
   let url: URL
   let headers: [String: String]
   let body: Data?
+  var cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
 
   var path: String {
     URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""
@@ -33,6 +34,7 @@ struct Reply: Sendable {
   var body = Data()
   var failure: URLError.Code?
   var hang = false
+  var delay: TimeInterval = 0
 
   static func json(_ text: String, status: Int = 200, headers: [String: String] = [:]) -> Reply {
     Reply(
@@ -155,7 +157,7 @@ final class FakeProtocol: URLProtocol {
     }
     let recorded = Recorded(
       method: request.httpMethod ?? "GET", url: url, headers: request.allHTTPHeaderFields ?? [:],
-      body: body)
+      body: body, cachePolicy: request.cachePolicy)
     api.requests.with { $0.append(recorded) }
     let reply = api.handler.get(recorded)
     if reply.hang { return }
@@ -165,9 +167,18 @@ final class FakeProtocol: URLProtocol {
     }
     let response = HTTPURLResponse(
       url: url, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: reply.headers)!
-    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: reply.body)
-    client?.urlProtocolDidFinishLoading(self)
+    let loader = Unchecked(value: self)
+    let finish: @Sendable () -> Void = {
+      let loader = loader.value
+      loader.client?.urlProtocol(loader, didReceive: response, cacheStoragePolicy: .notAllowed)
+      loader.client?.urlProtocol(loader, didLoad: reply.body)
+      loader.client?.urlProtocolDidFinishLoading(loader)
+    }
+    if reply.delay > 0 {
+      DispatchQueue.global().asyncAfter(deadline: .now() + reply.delay, execute: finish)
+    } else {
+      finish()
+    }
   }
 
   override func stopLoading() {}
@@ -203,4 +214,8 @@ enum Fixture {
 
   static let detail =
     #"{"customer":\#(summary),"asOf":"2026-10-09T01:47:13.968Z","subscription":{"product":{"key":"app","name":"App"},"plan":{"id":"p_2","key":"pro","name":"Pro"},"version":1,"cohort":null,"period":"monthly","startedAt":"2026-10-01T00:00:00Z","renewsAt":"2026-11-01T00:00:00Z","billing":null,"addOns":[{"plan":{"id":"p_3","key":"sso_addon","name":"SSO"},"version":1,"quantity":1,"countable":false,"addedAt":"2026-10-01T00:00:00Z","movingTo":null,"purchase":{"money":"test","channel":null,"release":2,"change":null,"arm":null}}],"pending":{"type":"cancel","movingTo":{"id":"p_1","key":"free","name":"Free"}},"purchase":{"money":"test","channel":{"provider":"stripe","connectionId":"conn_1"},"release":2,"change":null,"arm":"control"},"override":null},"defaultPlan":null,"products":[],"addOns":[],"entitlements":[],"banked":{"ai_credits":5},"moveOptions":[],"grants":[{"id":"g_1","feature":"sso","value":"true","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Trial","by":"key"}],"usage":{"items":[],"next":null},"activity":[{"text":"Registered","at":"2026-10-01T00:00:00Z"}],"selfServe":true,"environment":{"id":"env_1","name":"development","kind":"test"}}"#
+}
+
+struct Unchecked<Value>: @unchecked Sendable {
+  let value: Value
 }

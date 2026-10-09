@@ -94,10 +94,10 @@ public enum GeneratorCommand {
     do {
       list = try await EntitlerServer(key: key, options: options).features()
     } catch EntitlerError.api(let error) {
-      print("Entitler request failed: \(error.message) (\(error.code))")
+      print("Entitler request failed: \(withoutFullStop(error.message)) (\(error.code)).")
       return 1
     } catch {
-      print("Entitler request failed: \(error.localizedDescription)")
+      print("Entitler request failed: \(withoutFullStop(error.localizedDescription)).")
       return 1
     }
     let existing = try? String(contentsOfFile: file, encoding: .utf8)
@@ -119,6 +119,10 @@ public enum GeneratorCommand {
     }
     print("Wrote \(count) to \(file).")
     return 0
+  }
+
+  private static func withoutFullStop(_ message: String) -> String {
+    message.hasSuffix(".") ? String(message.dropLast()) : message
   }
 
   private static func withoutReadLine(_ source: String) -> String {

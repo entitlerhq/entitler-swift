@@ -7,9 +7,6 @@ on:
   merge_group:
   workflow_dispatch:
   workflow_call:
-    secrets:
-      ENTITLER_TEST_KEY:
-        required: false
   schedule:
     - cron: "17 4 * * *"
 
@@ -31,6 +28,17 @@ jobs:
           persist-credentials: false
       - name: Check formatting and lint
         run: swift format lint --strict --recursive Sources Tests Plugins Package.swift examples/Package.swift examples/quickstart examples/pricing-page examples/in-app examples/metered-work examples/offline examples/billing examples/swiftui-view-model
+
+  build:
+    name: Build and type check
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build every target with warnings as errors
+        run: swift build --build-tests -Xswiftc -warnings-as-errors
 
   test:
     name: Test (${{ matrix.name }})
@@ -197,7 +205,7 @@ jobs:
   all-checks-passed:
     name: All checks passed
     if: always()
-    needs: [lint, test, docs, examples, package, integration]
+    needs: [lint, build, test, docs, examples, package, integration]
     runs-on: ubuntu-24.04
     steps:
       - name: Fail unless every job succeeded

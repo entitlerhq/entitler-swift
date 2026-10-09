@@ -22,11 +22,15 @@ public struct EntitlerOptions: Sendable {
   public var cache: (any CacheStore)?
   /// How long, in seconds, a kept answer may stand in while Entitler is unreachable.
   public var staleFor: TimeInterval
-  /// Called with each error a fallback absorbed: a stale answer, or an `isEntitled` default.
-  public var onError: (@Sendable (EntitlerError) -> Void)?
+  /// Called with each error a fallback absorbed: a stale answer, an `isEntitled` default, a failed
+  /// release in `withHold`, or a custom store's own failure. It never changes a call's answer.
+  public var onError: (@Sendable (any Error) -> Void)?
   /// Read the API at another instant. Needs the organisation's `as_of` capability.
   public var asOf: Date?
   /// The session requests go through, for tests, proxies and instrumentation.
+  ///
+  /// The SDK refuses redirects and bypasses `URLCache` on every request, an injected session's
+  /// included. The default session has no `URLCache`.
   public var session: URLSession
 
   /// Creates options; each one left out takes its default.
@@ -37,9 +41,9 @@ public struct EntitlerOptions: Sendable {
     maxRetryDelay: TimeInterval = 10,
     cache: (any CacheStore)? = MemoryCacheStore(capacity: 1_000),
     staleFor: TimeInterval = 86_400,
-    onError: (@Sendable (EntitlerError) -> Void)? = nil,
+    onError: (@Sendable (any Error) -> Void)? = nil,
     asOf: Date? = nil,
-    session: URLSession = .shared
+    session: URLSession = defaultSession
   ) {
     self.baseURL = baseURL
     self.timeout = timeout

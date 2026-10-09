@@ -7,6 +7,7 @@ let liveKey = ProcessInfo.processInfo.environment["ENTITLER_TEST_KEY"] ?? ""
 
 enum Live {
   static let aiCredits = Feature<Metered>("ai_credits")
+  static let exportPDF = Feature<OnOff>("export_pdf")
   static let collaboration = Feature<FeatureGroup>(
     "collaboration", includes: ["team_seats", "shared_folders"])
   static let sso = Feature<OnOff>("sso")
@@ -37,6 +38,8 @@ enum Live {
   }
 }
 
+/// The live API suite. The SDK test project has no sign-in provider, so the identity client is
+/// covered by the unit tests only.
 @Suite(
   .enabled(if: !liveKey.isEmpty, "Live API tests skipped: set ENTITLER_TEST_KEY to run them."),
   .serialized)
@@ -46,8 +49,7 @@ struct LiveTests {
     let scopes = try await server.scopes()
     #expect(scopes.contains(.plansRead))
     #expect(scopes.contains(.tracksAssign))
-    let visitor = newVisitorID()
-    let pricing = try await server.pricing(visitor: visitor)
+    let pricing = try await server.pricing(visitor: newVisitorID())
     #expect(pricing.plans.contains { $0.key == "pro" })
     #expect(pricing.defaultPlan == "free")
     let features = try await server.features()
@@ -94,12 +96,13 @@ struct LiveTests {
       #expect(!entitlements.has(Live.collaboration))
       #expect(entitlements[Live.collaboration] != nil)
       #expect(entitlements.has(Live.aiCredits))
-      var request = try customer.handle.request("GET", ["entitlements", "sso"], timeout: nil)
-      request.cached = true
-      let first = try await server.core.send(request)
-      let etag = try #require(first.etag)
-      let second = try await server.core.send(request, ifNoneMatch: etag)
-      #expect(second.status == 304)
+      for segments in [["entitlements", "export_pdf"], ["entitlements"]] {
+        let request = try customer.handle.request("GET", segments, timeout: nil)
+        let first = try await server.core.send(request)
+        let etag = try #require(first.etag)
+        let second = try await server.core.send(request, ifNoneMatch: etag)
+        #expect(second.status == 304)
+      }
       #expect(await customer.isEntitled(to: Live.sso, default: true) == false)
     }
   }
@@ -117,7 +120,7 @@ struct LiveTests {
       let refused = try await customer.recordUsage(of: Live.aiCredits, amount: 100)
       #expect(refused.outcome == .refused)
       #expect(refused.refusal == .overAllowance)
-      let observed = try await customer.recordUsage(of: "ai_credits", amount: 20, mode: .observe)
+      let observed = try await customer.recordUsage(of: Live.aiCredits, amount: 20, mode: .observe)
       #expect(observed.outcome == .recorded)
       #expect(observed.overBy == 5)
       try await customer.vendor.setMeter(Live.aiCredits, to: 0)
@@ -136,11 +139,16 @@ struct LiveTests {
       #expect(settled.outcome == .settled)
       let released = try await customer.holdUsage(of: Live.aiCredits, amount: 2)
       let releasedID = try #require(released.holdID)
-      #expect(try await customer.releaseUsage(hold: releasedID).outcome == .released)
-      #expect(try await customer.hold(id: releasedID).state == .released)
+      let release = try await customer.releaseUsage(hold: releasedID)
+      #expect(release.outcome == .released)
+      let releasedHold = try await customer.hold(id: releasedID)
+      #expect(releasedHold.state == .released)
 
-      let used = try await customer.withHold(of: Live.aiCredits, amount: 3) { _ in 2 }
-      #expect(used == 2)
+      let output = try await customer.withHold(of: Live.aiCredits, amount: 3) { hold in
+        try hold.use(2)
+        return "done"
+      }
+      #expect(output == "done")
       struct WorkFailed: Error {}
       await #expect(throws: WorkFailed.self) {
         try await customer.withHold(of: Live.aiCredits, amount: 3) { _ in throw WorkFailed() }
@@ -163,15 +171,16 @@ struct LiveTests {
       #expect(cancelled.outcome == .cancelled)
       let meter = try await customer.vendor.setMeter(Live.aiCredits, to: 7)
       #expect(meter.outcome == .adjusted)
-      #expect(try await customer.usage().features.first { $0.feature == "ai_credits" }?.used == 7)
+      let usage = try await customer.usage()
+      #expect(usage.features.first { $0.feature == "ai_credits" }?.used == 7)
     }
   }
 
-  @Test func planSpaceAndCustomerPricing() async throws {
+  @Test func plansAndCustomerPricing() async throws {
     try await Live.withCustomer { _, customer in
-      let space = try await customer.planSpace()
-      #expect(space.held.contains { $0.plan.key == "free" })
-      #expect(space.options.contains { $0.plan.key == "pro" })
+      let plans = try await customer.plans()
+      #expect(plans.held.contains { $0.plan.key == "free" })
+      #expect(plans.options.contains { $0.plan.key == "pro" })
       let pricing = try await customer.pricing()
       #expect(pricing.customer == customer.id)
       #expect(pricing.plans.contains { $0.key == "pro" })
@@ -185,16 +194,22 @@ struct LiveTests {
       })
       let scopes = try await client.scopes()
       #expect(scopes.scopes == [.entitlementsRead, .usageRead, .usageWrite])
-      #expect(try await client.me.check(Live.aiCredits).entitled)
+      let check = try await client.me.check(Live.aiCredits)
+      #expect(check.entitled)
       #expect(await client.me.id == customer.id)
-      #expect(try await client.me.entitlements().has(Live.aiCredits))
+      let entitlements = try await client.me.entitlements()
+      #expect(entitlements.has(Live.aiCredits))
       let recorded = try await client.me.recordUsage(of: Live.aiCredits, amount: 1)
       #expect(recorded.reportedAs == .client)
+      let narrow = try EntitlerClient(tokenProvider: {
+        try await customer.token(scopes: [.entitlementsRead, .usageWrite]).token
+      })
       do {
-        _ = try await ServerCustomer(id: customer.id, core: client.core).details()
-        Issue.record("A customer token read a server route.")
+        _ = try await narrow.me.usage()
+        Issue.record("A token without usage:read read usage.")
       } catch EntitlerError.api(let error) {
-        #expect([ErrorCode.credentialNotAllowed, .scopeRequired].contains(error.code))
+        #expect(error.status == 403)
+        #expect(error.code == .scopeRequired)
       }
     }
   }
@@ -236,36 +251,40 @@ struct LiveTests {
   }
 
   @Test func billing() async throws {
-    try await Live.withCustomer { _, customer in
+    try await Live.withCustomer { server, customer in
       let pro = try await customer.subscribe(to: "pro", period: "Monthly")
       #expect(pro.customer.plan?.key == "pro")
-      let free = try await customer.cancel(when: .now)
-      #expect(free.customer.plan?.key != "pro")
-      let team = try await customer.vendor.subscribe(to: "team")
-      #expect(team.customer.plan?.key == "team")
-      #expect(team.selfServe == false)
       let added = try await customer.addAddOn("sso_addon")
       #expect(
         added.addOns.contains { $0.plan.key == "sso_addon" }
           || added.subscription?.addOns.contains { $0.plan.key == "sso_addon" } == true)
       let removed = try await customer.removeAddOn("sso_addon")
-      #expect(!removed.addOns.contains { $0.plan.key == "sso_addon" })
+      #expect(removed.subscription?.addOns.contains { $0.plan.key == "sso_addon" } != true)
+      let free = try await customer.cancel(when: .now)
+      #expect(free.customer.plan?.key != "pro")
+      let pricing = try await server.pricing()
+      let period = try #require(
+        pricing.plans.first { $0.key == "pro_basic" }?.periods.first?.label)
+      let basic = try await customer.vendor.subscribe(to: "pro_basic", period: period)
+      #expect(basic.customer.plan?.key == "pro_basic")
       let granted = try await customer.vendor.grant(Live.sso, days: 1, reason: "SDK test")
       let grant = try #require(granted.grants.first { $0.feature == "sso" && $0.revokedAt == nil })
       let revoked = try await customer.vendor.revokeGrant(grant.id)
       #expect(revoked.grants.first { $0.id == grant.id }?.revokedAt != nil)
-      #expect(try await customer.vendor.setMeter(Live.aiCredits, to: 3).outcome == .adjusted)
-      for call in [
+      let meter = try await customer.vendor.setMeter(Live.aiCredits, to: 3)
+      #expect(meter.outcome == .adjusted)
+      let calls: [@Sendable () async throws -> Void] = [
         {
           _ = try await customer.checkout(
-            "pro", successURL: URL(string: "https://example.com/ok")!,
+            "pro", period: "Monthly", successURL: URL(string: "https://example.com/ok")!,
             cancelURL: URL(string: "https://example.com/no")!)
         },
         {
           _ = try await customer.billingPortal(
             returnURL: URL(string: "https://example.com/account")!)
         },
-      ] as [() async throws -> Void] {
+      ]
+      for call in calls {
         do {
           try await call()
           Issue.record("Expected 409 stale")

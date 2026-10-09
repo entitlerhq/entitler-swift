@@ -309,8 +309,16 @@ extension JSONWebKey {
 
   @Test func cacheEntriesAreCodable() throws {
     let entry = CacheEntry(
-      body: Data("{}".utf8), etag: "\"e\"", maxAge: 30, receivedAt: Date(timeIntervalSince1970: 0))
+      body: "{}", etag: "\"e\"", cacheControl: "max-age=30", age: 2,
+      receivedAt: Date(timeIntervalSince1970: 0))
     #expect(try JSONDecoder().decode(CacheEntry.self, from: JSONEncoder().encode(entry)) == entry)
+    #expect(entry.v == 1)
+    #expect(entry.maxAge == 30)
+    #expect(entry.isFresh(at: Date(timeIntervalSince1970: 27)))
+    #expect(!entry.isFresh(at: Date(timeIntervalSince1970: 28)))
+    var noCache = entry
+    noCache.cacheControl = "max-age=30, no-cache"
+    #expect(!noCache.isFresh(at: Date(timeIntervalSince1970: 1)))
   }
 
   @Test func allEnumsMapTheirValues() throws {

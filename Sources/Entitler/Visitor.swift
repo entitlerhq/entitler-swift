@@ -21,12 +21,13 @@ func validVisitor(_ visitor: String?) throws -> String? {
   return visitor
 }
 
-func validIdempotencyKey(_ key: String?) throws -> String? {
+func validIdempotencyKey(
+  _ key: String?, maxLength: Int = 200, message: String = Messages.idempotencyKey
+) throws -> String? {
   guard let key else { return nil }
-  guard (1...200).contains(key.utf8.count), key.utf8.allSatisfy({ (0x20...0x7e).contains($0) })
-  else {
-    throw ArgumentError(message: Messages.idempotencyKey)
-  }
+  guard (1...maxLength).contains(key.utf8.count),
+    key.utf8.allSatisfy({ (0x20...0x7e).contains($0) }), key.first != " ", key.last != " "
+  else { throw ArgumentError(message: message) }
   return key
 }
 

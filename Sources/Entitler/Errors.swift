@@ -13,11 +13,12 @@ import Foundation
 /// ```
 ///
 /// Cancelling the task surfaces `CancellationError`, and an invalid argument surfaces
-/// ``ArgumentError``; neither is an `EntitlerError`.
+/// ``ArgumentError``; neither is an `EntitlerError`. No error holds a credential, a request or a
+/// request's headers.
 public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConvertible {
-  /// The API answered with a status other than 2xx.
+  /// The API answered with a status other than 2xx, or with a 2xx answer this SDK cannot read.
   case api(APIError)
-  /// No answer arrived: DNS, TLS, or a refused or reset connection.
+  /// No answer arrived: DNS, TLS, or a refused, reset or cut-off connection.
   case connection(ConnectionError)
   /// An attempt took longer than its timeout.
   case timeout(TimeoutError)
@@ -25,8 +26,10 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   case token(TokenError)
   /// An offline snapshot failed verification.
   case snapshot(SnapshotError)
-  /// `withHold(of:amount:)` was refused its hold.
+  /// `withHold(of:amount:)` was refused its hold, or its key replayed a finished one.
   case usageRefused(UsageResult)
+  /// `withHold(of:amount:)` ran its work, then failed to settle the hold or record the excess.
+  case usageSettlement(UsageSettlementError)
 
   /// The message of the error this case carries.
   public var errorDescription: String? { description }
@@ -40,40 +43,55 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .token(let error): error.message
     case .snapshot(let error): error.message
     case .usageRefused(let answer):
-      "Entitler refused the hold on \(answer.feature) (\(answer.refusal?.rawValue ?? "refused"))."
+      "Entitler refused the hold on \(answer.feature) (\(answer.refusal?.rawValue ?? answer.outcome.rawValue))."
+    case .usageSettlement(let error): error.message
     }
   }
 
   var isUnreachable: Bool {
     switch self {
     case .connection, .timeout: true
-    case .api(let error): error.status == 429 || error.status >= 500
+    case .api(let error):
+      error.status == 429 || error.status >= 500 || error.code == .invalidResponse
     default: false
     }
   }
 
-  func withHoldID(_ holdID: String) -> EntitlerError {
-    switch self {
-    case .api(var error):
-      error.holdID = holdID
-      return .api(error)
-    case .connection(var error):
-      error.holdID = holdID
-      return .connection(error)
-    case .timeout(var error):
-      error.holdID = holdID
-      return .timeout(error)
-    case .token(var error):
-      error.holdID = holdID
-      return .token(error)
-    default:
-      return self
-    }
+  var apiError: APIError? {
+    if case .api(let error) = self { return error }
+    return nil
   }
 }
 
-/// The API answered with a status other than 2xx.
-public struct APIError: Error, Sendable, Hashable, LocalizedError, CustomStringConvertible {
+/// `withHold(of:amount:)` ran its work, then failed to settle the hold or record the excess.
+///
+/// Keep ``result``, and settle the hold with ``holdID`` and ``amount`` before it expires.
+public struct UsageSettlementError: Error, Sendable, LocalizedError, CustomStringConvertible {
+  /// The hold that is still open.
+  public let holdID: String
+  /// The amount still to settle; 0 when the hold was settled.
+  public let amount: Int64
+  /// The amount past the hold still to record in observe mode, if any.
+  public let excess: Int64?
+  /// The failure.
+  public let underlyingError: any Error
+  /// The work's result.
+  public let result: any Sendable
+
+  /// What went wrong.
+  public var message: String {
+    "The work ran, but its usage on hold \(holdID) is not recorded: \(underlyingError.localizedDescription)"
+  }
+
+  /// What went wrong.
+  public var errorDescription: String? { message }
+
+  /// What went wrong.
+  public var description: String { message }
+}
+
+/// The API answered with a status other than 2xx, or with a 2xx answer this SDK cannot read.
+public struct APIError: Error, Sendable, LocalizedError, CustomStringConvertible {
   /// The HTTP status.
   public let status: Int
   /// The error code from the answer, or ``ErrorCode/httpError`` when it had none.
@@ -86,14 +104,14 @@ public struct APIError: Error, Sendable, Hashable, LocalizedError, CustomStringC
   public let retryAfter: TimeInterval?
   /// The idempotency key the request sent, to repeat the call later with the same key.
   public let idempotencyKey: String?
-  /// The hold a failed settlement was for, so the app can settle it again.
-  public internal(set) var holdID: String?
   /// With `402 payment_required`: the payment a plan change waits on.
   public let payment: Payment?
   /// With `409 listing_gaps`: the gaps a rollout would leave.
   public let listingGaps: [ListingGap]
   /// With `409 listing_invalid`: the listings whose price fails the checks.
   public let listingProblems: [ListingProblem]
+  /// For ``ErrorCode/invalidResponse``, the decoding failure.
+  public internal(set) var underlyingError: (any Error)? = nil
 
   /// The message from the answer.
   public var errorDescription: String? { message }
@@ -108,8 +126,6 @@ public struct ConnectionError: Error, Sendable, LocalizedError, CustomStringConv
   public let underlyingError: any Error
   /// The idempotency key the request sent, to repeat the call later with the same key.
   public let idempotencyKey: String?
-  /// The hold a failed settlement was for, so the app can settle it again.
-  public internal(set) var holdID: String?
 
   /// A sentence saying Entitler could not be reached.
   public var message: String {
@@ -129,8 +145,6 @@ public struct TimeoutError: Error, Sendable, LocalizedError, CustomStringConvert
   public let timeout: TimeInterval
   /// The idempotency key the request sent, to repeat the call later with the same key.
   public let idempotencyKey: String?
-  /// The hold a failed settlement was for, so the app can settle it again.
-  public internal(set) var holdID: String?
 
   /// A sentence naming the timeout.
   public var message: String { "Entitler did not answer within \(timeout.formatted()) seconds." }
@@ -148,8 +162,6 @@ public struct TokenError: Error, Sendable, LocalizedError, CustomStringConvertib
   public let message: String
   /// The error the provider threw, if it threw one.
   public let underlyingError: (any Error)?
-  /// The hold a failed settlement was for, so the app can settle it again.
-  public internal(set) var holdID: String?
 
   /// What went wrong.
   public var errorDescription: String? { message }
@@ -213,6 +225,12 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
   public static let bodyTooLarge = ErrorCode(rawValue: "body_too_large")
   /// The browser origin is not allowed for the key.
   public static let browserNotAllowed = ErrorCode(rawValue: "browser_not_allowed")
+  /// The SDK's own code for a batch request whose answer never arrived.
+  public static let connectionFailed = ErrorCode(rawValue: "connection_failed")
+  /// The SDK's own code for a 2xx answer it cannot read.
+  public static let invalidResponse = ErrorCode(rawValue: "invalid_response")
+  /// The SDK's own code for a batch request that took longer than its timeout.
+  public static let timedOut = ErrorCode(rawValue: "timed_out")
   /// A cap, such as live grants per customer, is reached.
   public static let capReached = ErrorCode(rawValue: "cap_reached")
   /// A carried-forward change conflicts.

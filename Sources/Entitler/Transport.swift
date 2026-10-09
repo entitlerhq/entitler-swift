@@ -14,10 +14,10 @@ struct Hooks: Sendable {
   var sleep: @Sendable (TimeInterval) async throws -> Void = { seconds in
     try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
   }
-  var random: @Sendable (ClosedRange<Double>) -> Double = { Double.random(in: $0) }
   var deadline: @Sendable (TimeInterval) async throws -> Void = { seconds in
     try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
   }
+  var random: @Sendable (ClosedRange<Double>) -> Double = { Double.random(in: $0) }
 
   @TaskLocal static var current = Hooks()
 }
@@ -29,18 +29,21 @@ enum Credential: Sendable {
 }
 
 struct Request: Sendable {
-  var method = "GET"
+  var method: String
   var path: String
   var query: [(name: String, value: String)] = []
   var body: Data?
   var idempotencyKey: String?
   var visitor: String?
   var timeout: TimeInterval?
-  var cached = false
   var customer: String?
+  var changesAnswers = true
   var authenticated = true
 
   init(_ method: String, _ segments: [String], body: (any Encodable)? = nil) throws {
+    guard !segments.contains(where: { !$0.isEmpty && $0.allSatisfy { $0 == "." } }) else {
+      throw ArgumentError(message: Messages.dots)
+    }
     self.method = method
     path = "/" + segments.map(\.componentEncoded).joined(separator: "/")
     if let body { self.body = try JSON.encoder().encode(body) }
@@ -51,52 +54,87 @@ struct Response: Sendable {
   let status: Int
   let body: Data
   let etag: String?
-  let maxAge: TimeInterval?
-  let noStore: Bool
+  let cacheControl: String?
+  let age: Int?
+  let retryAfter: TimeInterval?
+
+  var noStore: Bool { cacheControl?.lowercased().contains("no-store") ?? false }
 }
 
 struct Named: Decodable {
   let customer: String
 }
 
-actor SignedInID {
-  private(set) var id: String?
+actor ClientState {
+  private var generations: [String: (generation: UInt64, at: Date)] = [:]
+  private var counter: UInt64 = 0
+  private var outageUntil: Date?
+  private var probing = false
+  private(set) var signedInID: String?
 
-  func set(_ id: String) { self.id = id }
-}
-
-actor WriteLog {
-  private var times: [String: Date] = [:]
-  private var longestMaxAge: TimeInterval = 0
-
-  func record(_ customer: String, at now: Date) {
-    times[customer] = now
-    if times.count > 1_000 {
-      times = times.filter { now.timeIntervalSince($0.value) <= longestMaxAge }
+  func bump(_ customer: String, at now: Date) {
+    counter += 1
+    generations[customer] = (counter, now)
+    if generations.count > 10_000 {
+      generations = generations.filter { now.timeIntervalSince($0.value.at) < 86_400 }
     }
   }
 
-  func wrote(to customer: String, since date: Date) -> Bool {
-    times[customer].map { $0 >= date } ?? false
+  func generation(of customer: String?) -> (generation: UInt64, at: Date?) {
+    guard let customer, let kept = generations[customer] else { return (0, nil) }
+    return (kept.generation, kept.at)
   }
 
-  func noteMaxAge(_ maxAge: TimeInterval) {
-    longestMaxAge = max(longestMaxAge, maxAge)
+  func servesFromCache(at now: Date) -> Bool {
+    guard let outageUntil else { return false }
+    if now < outageUntil || probing { return true }
+    probing = true
+    return false
+  }
+
+  func reachable() {
+    outageUntil = nil
+    probing = false
+  }
+
+  func unreachable(until date: Date) {
+    outageUntil = max(outageUntil ?? date, date)
+    probing = false
+  }
+
+  func setSignedInID(_ id: String) { signedInID = id }
+}
+
+final class RedirectRefuser: NSObject, URLSessionTaskDelegate, Sendable {
+  static let shared = RedirectRefuser()
+
+  func urlSession(
+    _ session: URLSession, task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+  ) {
+    completionHandler(nil)
   }
 }
+
+@usableFromInline let defaultSession: URLSession = {
+  let configuration = URLSessionConfiguration.default
+  configuration.urlCache = nil
+  configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+  return URLSession(
+    configuration: configuration, delegate: RedirectRefuser.shared, delegateQueue: nil)
+}()
 
 final class Core: Sendable, CustomReflectable {
   let options: EntitlerOptions
   let credential: Credential
   let visitor: String?
-  let writes = WriteLog()
-  let signedIn: SignedInID?
+  let state = ClientState()
 
   init(options: EntitlerOptions, credential: Credential, visitor: String?) throws {
     self.options = try options.validated()
     self.credential = credential
     self.visitor = visitor
-    if case .server = credential { signedIn = nil } else { signedIn = SignedInID() }
   }
 
   var kind: String {
@@ -107,18 +145,20 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  var customMirror: Mirror { Mirror(self, children: ["baseURL": options.base, "kind": kind]) }
-
-  func call<Answer: Decodable>(_ request: Request) async throws -> Answer {
-    try decode(try await send(request))
+  var isInApp: Bool {
+    if case .server = credential { return false }
+    return true
   }
 
-  func cachedCall<Answer: Decodable>(_ request: Request) async throws -> Answer {
-    var request = request
-    request.cached = true
-    let (response, stale) = try await read(request)
-    let answer: Answer = try decode(response)
-    return stale ? markedStale(answer) : answer
+  var customMirror: Mirror { Mirror(self, children: ["baseURL": options.base, "kind": kind]) }
+
+  func report(_ error: any Error) {
+    options.onError?(error)
+  }
+
+  func call<Answer: Decodable>(_ request: Request) async throws -> Answer {
+    let response = try await send(request)
+    return try decode(response)
   }
 
   private func decode<Answer: Decodable>(_ response: Response) throws -> Answer {
@@ -127,75 +167,126 @@ final class Core: Sendable, CustomReflectable {
     } catch {
       throw EntitlerError.api(
         APIError(
-          status: response.status, code: .httpError,
-          message: "Entitler answered with a body this SDK cannot read.", requestID: nil,
-          retryAfter: nil, idempotencyKey: nil, payment: nil, listingGaps: [], listingProblems: []))
+          status: response.status, code: .invalidResponse,
+          message: "Entitler sent an answer this SDK cannot read.", requestID: nil, retryAfter: nil,
+          idempotencyKey: nil, payment: nil, listingGaps: [], listingProblems: [],
+          underlyingError: error))
     }
   }
 
-  private func read(_ request: Request) async throws -> (Response, stale: Bool) {
-    guard let cache = options.cache else { return (try await send(request), false) }
+  func cachedCall<Answer: Decodable>(_ request: Request) async throws -> Answer {
+    guard let cache = options.cache else { return try await call(request) }
     let hooks = Hooks.current
-    let key = try await cacheKey(request)
-    let kept = await cache.entry(forKey: key)
-    if let kept, let maxAge = kept.maxAge, hooks.now().timeIntervalSince(kept.receivedAt) < maxAge {
-      let written = await request.customer.asyncMap {
-        await writes.wrote(to: $0, since: kept.receivedAt)
-      }
-      if written != true { return (Response(status: 200, body: kept.body), false) }
+    let token: String?
+    do {
+      token = request.authenticated ? try await currentToken() : nil
+    } catch let error as EntitlerError {
+      guard case .token = error, let previous = await previousToken(),
+        let kept = await entry(cacheKey(request, token: previous), in: cache),
+        hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor
+      else { throw error }
+      report(error)
+      return markedStale(try decode(Response(kept)))
+    }
+    let key = cacheKey(request, token: token)
+    let kept = await entry(key, in: cache)
+    let started = await state.generation(of: request.customer)
+    if let kept, kept.isFresh(at: hooks.now()), started.at.map({ $0 < kept.receivedAt }) ?? true {
+      return try decode(Response(kept))
+    }
+    if let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor,
+      await state.servesFromCache(at: hooks.now())
+    {
+      return markedStale(try decode(Response(kept)))
     }
     do {
-      let response = try await send(request, ifNoneMatch: kept?.etag)
+      let response = try await send(request, token: token, ifNoneMatch: kept?.etag)
+      var entry: CacheEntry?
       if response.status == 304 {
         guard let kept else {
           throw EntitlerError.api(
             APIError(
-              status: 304, code: .httpError, message: "Entitler request failed with HTTP 304.",
+              status: 304, code: .httpError, message: "Entitler answered with HTTP 304.",
               requestID: nil, retryAfter: nil, idempotencyKey: nil, payment: nil, listingGaps: [],
               listingProblems: []))
         }
-        await keep(response, body: kept.body, etag: response.etag ?? kept.etag, key: key, in: cache)
-        return (Response(status: 200, body: kept.body), false)
+        entry = CacheEntry(
+          body: kept.body, etag: response.etag ?? kept.etag,
+          cacheControl: response.cacheControl ?? kept.cacheControl, age: response.age ?? kept.age,
+          receivedAt: hooks.now())
+      } else if !response.noStore,
+        response.etag != nil || response.cacheControl?.lowercased().contains("max-age") == true
+      {
+        entry = CacheEntry(
+          body: String(decoding: response.body, as: UTF8.self), etag: response.etag,
+          cacheControl: response.cacheControl, age: response.age, receivedAt: hooks.now())
       }
-      await keep(response, body: response.body, etag: response.etag, key: key, in: cache)
-      return (response, false)
+      let answer: Answer = try decode(entry.map(Response.init) ?? response)
+      await state.reachable()
+      if var entry {
+        if await state.generation(of: request.customer).generation != started.generation {
+          entry.cacheControl = (entry.cacheControl.map { $0 + ", " } ?? "") + "no-cache"
+        }
+        await store(entry, key: key, in: cache)
+      }
+      return answer
     } catch let error as EntitlerError where error.isUnreachable {
+      let retryAfter = error.apiError?.retryAfter ?? 0
+      await state.unreachable(until: hooks.now().addingTimeInterval(max(30, retryAfter)))
       guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor else {
         throw error
       }
-      options.onError?(error)
-      return (Response(status: 200, body: kept.body), true)
+      report(error)
+      return markedStale(try decode(Response(kept)))
     }
   }
 
-  private func keep(
-    _ response: Response, body: Data, etag: String?, key: String, in cache: any CacheStore
-  ) async {
-    guard !response.noStore, etag != nil || response.maxAge != nil else { return }
-    if let maxAge = response.maxAge { await writes.noteMaxAge(maxAge) }
-    await cache.setEntry(
-      CacheEntry(body: body, etag: etag, maxAge: response.maxAge, receivedAt: Hooks.current.now()),
-      forKey: key)
+  private func entry(_ key: String, in cache: any CacheStore) async -> CacheEntry? {
+    do {
+      return try await cache.entry(forKey: key)
+    } catch {
+      report(error)
+      return nil
+    }
   }
 
-  private func cacheKey(_ request: Request) async throws -> String {
-    let principal: String
+  private func store(_ entry: CacheEntry, key: String, in cache: any CacheStore) async {
+    do {
+      try await cache.setEntry(
+        entry, forKey: key, timeToLive: options.staleFor + (entry.maxAge ?? 0))
+    } catch {
+      report(error)
+    }
+  }
+
+  private func previousToken() async -> String? {
+    switch credential {
+    case .server: return nil
+    case .token(let source), .identity(_, let source):
+      if let current = await source.current { return current }
+      return await source.previous
+    }
+  }
+
+  func cacheKey(_ request: Request, token: String?) -> String {
+    let kind: String
+    let secret: String
     switch credential {
     case .server(let key):
-      principal = key
-    case .token(let source):
-      principal = JWT.principal(
-        try await source.token(now: Hooks.current.now()), claims: ["iss", "eid", "sub"])
-    case .identity(let key, let source):
-      let token = try await source.token(now: Hooks.current.now())
-      principal = key + "\n" + JWT.principal(token, claims: ["iss", "sub"])
+      kind = "key"
+      secret = key
+    case .token:
+      kind = "customer-token"
+      secret = token ?? ""
+    case .identity(let key, _):
+      kind = "identity"
+      secret = key + "\n" + (token ?? "")
     }
-    let parts = [
-      request.method, url(for: request).absoluteString, options.asOf.map(formatInstant) ?? "",
-      request.visitor ?? visitor ?? "", principal,
+    let parts: [String?] = [
+      "entitler-cache-v1", request.method, url(for: request).absoluteString, kind, sha256(secret),
+      options.asOf.map(formatInstant), request.visitor ?? visitor,
     ]
-    return SHA256.hash(data: Data(parts.joined(separator: "\n").utf8))
-      .map { String(format: "%02x", $0) }.joined()
+    return sha256("[" + parts.map { $0.map(jsonString) ?? "null" }.joined(separator: ",") + "]")
   }
 
   func url(for request: Request) -> URL {
@@ -209,22 +300,14 @@ final class Core: Sendable, CustomReflectable {
     return URL(string: text)!
   }
 
-  func send(_ request: Request, ifNoneMatch etag: String? = nil) async throws -> Response {
-    guard request.method != "GET", let customer = request.customer else {
-      return try await exchange(request, ifNoneMatch: etag)
+  func send(_ request: Request, token: String? = nil, ifNoneMatch etag: String? = nil) async throws
+    -> Response
+  {
+    if request.method != "GET", request.changesAnswers, let customer = request.customer {
+      await state.bump(customer, at: Hooks.current.now())
     }
-    await writes.record(customer, at: Hooks.current.now())
-    do {
-      let response = try await exchange(request, ifNoneMatch: etag)
-      await writes.record(customer, at: Hooks.current.now())
-      return response
-    } catch {
-      await writes.record(customer, at: Hooks.current.now())
-      throw error
-    }
-  }
-
-  private func exchange(_ request: Request, ifNoneMatch etag: String?) async throws -> Response {
+    var token = token
+    if token == nil, request.authenticated { token = try await currentToken() }
     let hooks = Hooks.current
     let idempotencyKey =
       request.method == "GET" ? nil : request.idempotencyKey ?? UUID().uuidString.lowercased()
@@ -232,8 +315,9 @@ final class Core: Sendable, CustomReflectable {
     var retries = 0
     var refreshed = false
     while true {
-      let token = request.authenticated ? try await currentToken() : nil
-      var urlRequest = URLRequest(url: url(for: request), timeoutInterval: timeout)
+      var urlRequest = URLRequest(
+        url: url(for: request), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout
+      )
       urlRequest.httpMethod = request.method
       urlRequest.httpBody = request.body
       for (name, value) in headers(
@@ -245,25 +329,23 @@ final class Core: Sendable, CustomReflectable {
       do {
         let (body, http) = try await attempt(
           urlRequest, timeout: timeout, idempotencyKey: idempotencyKey)
-        if http.statusCode == 401, !refreshed, let token,
-          let fresh = try await refresh(replacing: token),
-          fresh != token
+        if http.statusCode == 401, !refreshed, let sent = token,
+          let fresh = try await refresh(replacing: sent), fresh != sent
         {
           refreshed = true
+          token = fresh
           continue
         }
-        let response = Response(http, body: body)
+        let response = Response(http, body: body, now: hooks.now())
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
-          if let signedIn, let named = try? JSON.decoder().decode(Named.self, from: body) {
-            await signedIn.set(named.customer)
+          if isInApp, let named = try? JSON.decoder().decode(Named.self, from: body) {
+            await state.setSignedInID(named.customer)
           }
           return response
         }
         let error = apiError(http, body: body, idempotencyKey: idempotencyKey, now: hooks.now())
         guard [408, 429, 500, 502, 503, 504].contains(http.statusCode), retries < options.maxRetries
-        else {
-          throw EntitlerError.api(error)
-        }
+        else { throw EntitlerError.api(error) }
         if let retryAfter = error.retryAfter {
           guard retryAfter <= options.maxRetryDelay else { throw EntitlerError.api(error) }
           try await hooks.sleep(retryAfter)
@@ -283,25 +365,23 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func attempt(
-    _ request: URLRequest, timeout: TimeInterval, idempotencyKey: String?
-  ) async throws -> (Data, HTTPURLResponse) {
+  private func attempt(_ request: URLRequest, timeout: TimeInterval, idempotencyKey: String?)
+    async throws -> (Data, HTTPURLResponse)
+  {
     let session = options.session
     let hooks = Hooks.current
     do {
-      let (body, response) = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) {
-        group in
-        group.addTask { try await session.data(for: request) }
+      let answer = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) { group in
+        group.addTask { try await session.data(for: request, delegate: RedirectRefuser.shared) }
         group.addTask {
           try await hooks.deadline(timeout)
           return nil
         }
         defer { group.cancelAll() }
-        guard let first = try await group.next(), let answer = first else {
-          throw EntitlerError.timeout(
-            TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
-        }
-        return answer
+        return try await group.next() ?? nil
+      }
+      guard let (body, response) = answer else {
+        throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
       }
       guard let http = response as? HTTPURLResponse else {
         throw EntitlerError.connection(
@@ -313,11 +393,15 @@ final class Core: Sendable, CustomReflectable {
       throw error
     } catch {
       if Task.isCancelled || error is CancellationError { throw CancellationError() }
-      if let error = error as? URLError, error.code == .timedOut {
+      guard let urlError = error as? URLError else {
+        throw EntitlerError.connection(
+          ConnectionError(underlyingError: URLError(.unknown), idempotencyKey: idempotencyKey))
+      }
+      if urlError.code == .timedOut {
         throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
       }
       throw EntitlerError.connection(
-        ConnectionError(underlyingError: error, idempotencyKey: idempotencyKey))
+        ConnectionError(underlyingError: URLError(urlError.code), idempotencyKey: idempotencyKey))
     }
   }
 
@@ -325,16 +409,19 @@ final class Core: Sendable, CustomReflectable {
     -> [String: String]
   {
     var headers = ["Accept": "application/json", "User-Agent": userAgent]
-    if let token { headers["Authorization"] = "Bearer \(token)" }
-    if case .identity(let key, _) = credential, let token {
-      headers["Authorization"] = "Bearer \(key)"
-      headers["Entitler-Identity-Token"] = token
-    }
     if request.body != nil { headers["Content-Type"] = "application/json" }
     if let idempotencyKey { headers["Idempotency-Key"] = idempotencyKey }
+    if let etag { headers["If-None-Match"] = etag }
+    guard request.authenticated else { return headers }
+    switch credential {
+    case .identity(let key, _):
+      headers["Authorization"] = "Bearer \(key)"
+      headers["Entitler-Identity-Token"] = token
+    default:
+      if let token { headers["Authorization"] = "Bearer \(token)" }
+    }
     if let visitor = request.visitor ?? visitor { headers["Entitler-Visitor"] = visitor }
     if let asOf = options.asOf { headers["Entitler-As-Of"] = formatInstant(asOf) }
-    if let etag { headers["If-None-Match"] = etag }
     return headers
   }
 
@@ -342,14 +429,15 @@ final class Core: Sendable, CustomReflectable {
     switch credential {
     case .server(let key): key
     case .token(let source), .identity(_, let source):
-      try await source.token(now: Hooks.current.now())
+      try await source.token(now: Hooks.current.now(), timeout: options.timeout)
     }
   }
 
   private func refresh(replacing token: String) async throws -> String? {
     switch credential {
     case .server: nil
-    case .token(let source), .identity(_, let source): try await source.refresh(replacing: token)
+    case .token(let source), .identity(_, let source):
+      try await source.refresh(replacing: token, now: Hooks.current.now(), timeout: options.timeout)
     }
   }
 
@@ -370,7 +458,7 @@ final class Core: Sendable, CustomReflectable {
     return APIError(
       status: http.statusCode,
       code: detail?.code ?? .httpError,
-      message: detail?.message ?? "Entitler request failed with HTTP \(http.statusCode).",
+      message: detail?.message ?? "Entitler answered with HTTP \(http.statusCode).",
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
         retryAfter($0, now: now)
@@ -380,6 +468,28 @@ final class Core: Sendable, CustomReflectable {
       listingGaps: detail?.listingGaps ?? [],
       listingProblems: detail?.listingProblems ?? [])
   }
+}
+
+func sha256(_ text: String) -> String {
+  SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+}
+
+func jsonString(_ text: String) -> String {
+  var out = "\""
+  for scalar in text.unicodeScalars {
+    switch scalar {
+    case "\"": out += "\\\""
+    case "\\": out += "\\\\"
+    case "\n": out += "\\n"
+    case "\r": out += "\\r"
+    case "\t": out += "\\t"
+    case "\u{08}": out += "\\b"
+    case "\u{0C}": out += "\\f"
+    case let scalar where scalar.value < 0x20: out += String(format: "\\u%04x", scalar.value)
+    default: out.unicodeScalars.append(scalar)
+    }
+  }
+  return out + "\""
 }
 
 func retryAfter(_ value: String, now: Date) -> TimeInterval? {
@@ -393,48 +503,36 @@ func retryAfter(_ value: String, now: Date) -> TimeInterval? {
 }
 
 extension Response {
-  init(status: Int, body: Data) {
-    self.init(status: status, body: body, etag: nil, maxAge: nil, noStore: false)
+  init(_ entry: CacheEntry) {
+    self.init(
+      status: 200, body: Data(entry.body.utf8), etag: entry.etag, cacheControl: entry.cacheControl,
+      age: entry.age, retryAfter: nil)
   }
 
-  init(_ http: HTTPURLResponse, body: Data) {
-    let directives = (http.value(forHTTPHeaderField: "Cache-Control") ?? "").lowercased()
-      .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+  init(_ http: HTTPURLResponse, body: Data, now: Date) {
     self.init(
       status: http.statusCode,
       body: body,
       etag: http.value(forHTTPHeaderField: "ETag"),
-      maxAge: directives.first { $0.hasPrefix("max-age=") }.flatMap {
-        TimeInterval($0.dropFirst(8))
-      },
-      noStore: directives.contains("no-store"))
-  }
-}
-
-extension Optional {
-  func asyncMap<Mapped>(_ transform: (Wrapped) async throws -> Mapped) async rethrows -> Mapped? {
-    guard let self else { return nil }
-    return try await transform(self)
+      cacheControl: http.value(forHTTPHeaderField: "Cache-Control"),
+      age: http.value(forHTTPHeaderField: "Age").flatMap { Int($0.trimmed) },
+      retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
+        Entitler.retryAfter($0, now: now)
+      })
   }
 }
 
 let userAgent: String = {
-  #if os(iOS)
-    let system = "iOS"
-  #elseif os(macOS)
-    let system = "macOS"
-  #elseif os(tvOS)
-    let system = "tvOS"
-  #elseif os(watchOS)
-    let system = "watchOS"
-  #elseif os(visionOS)
-    let system = "visionOS"
-  #elseif os(Linux)
-    let system = "Linux"
+  #if swift(>=6.4)
+    let swift = "6.4"
+  #elseif swift(>=6.3)
+    let swift = "6.3"
+  #elseif swift(>=6.2)
+    let swift = "6.2"
+  #elseif swift(>=6.1)
+    let swift = "6.1"
   #else
-    let system = "unknown"
+    let swift = "6.0"
   #endif
-  let version = ProcessInfo.processInfo.operatingSystemVersion
-  return
-    "entitler-swift/\(entitlerSDKVersion) \(system)/\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+  return "entitler-swift/\(entitlerSDKVersion) swift/\(swift)"
 }()

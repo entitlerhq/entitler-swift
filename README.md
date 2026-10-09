@@ -84,7 +84,7 @@ or `Feature<FeatureGroup>`. The generator also runs as a command plugin:
 - [Checking access](docs/checking-access.md)
 - [Recording usage](docs/recording-usage.md)
 - [Pricing pages and visitors](docs/pricing-and-visitors.md)
-- [Plan space and upgrades](docs/plan-space.md)
+- [Changing plans](docs/changing-plans.md)
 - [Billing](docs/billing.md)
 - [The in-app client](docs/in-app-client.md)
 - [Offline snapshots](docs/offline-snapshots.md)

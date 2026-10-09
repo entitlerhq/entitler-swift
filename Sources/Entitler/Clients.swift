@@ -42,11 +42,21 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
 
   /// Records usage events of any customers, in observe mode, in requests of at most 500 events.
   ///
-  /// Every event needs an idempotency key: its own, else a generated one.
+  /// Every event needs an idempotency key: its own, else one the SDK generates. A request that
+  /// fails after its retries answers its events with ``UsageEventOutcome/error``, and the next
+  /// request still goes: resend those events with the same keys. Keys derived from your own unit
+  /// of work make any resend safe.
   ///
+  /// - Parameters:
+  ///   - events: The events; an empty list sends nothing.
+  ///   - register: Registers customers not registered yet, if the key may.
+  ///   - idempotencyKey: A key for the batch; each request sends it plus `:<request index>`.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   /// - Returns: One result per event, in input order, and the totals.
+  /// - Throws: Only ``ArgumentError`` and `CancellationError`.
   public func recordUsageBatch(
-    _ events: [UsageBatchEvent], register: Bool = false, timeout: TimeInterval? = nil
+    _ events: [UsageBatchEvent], register: Bool = false, idempotencyKey: String? = nil,
+    timeout: TimeInterval? = nil
   ) async throws -> UsageBatchResult {
     struct Event: Encodable {
       var customer: String
@@ -59,43 +69,66 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
       var register: Bool?
       var events: [Event]
     }
+    struct Answer: Decodable {
+      struct Result: Decodable {
+        let index: Int
+        let outcome: UsageEventOutcome
+        let id: String?
+        let late: Bool
+        let error: UsageEventError?
+      }
+      let results: [Result]
+    }
     let prepared = try events.map { event in
       Event(
         customer: try require(event.customer, Messages.customerID),
-        feature: try requireFeature(event.feature), amount: event.amount,
+        feature: try requireFeature(event.feature.key), amount: try event.amount.map(validAmount),
         occurredAt: event.occurredAt,
         idempotencyKey: try validIdempotencyKey(event.idempotencyKey)
           ?? UUID().uuidString.lowercased())
     }
+    let requests = (prepared.count + 499) / 500
+    let batchKey = try validIdempotencyKey(
+      idempotencyKey, maxLength: 199 - String(max(0, requests - 1)).count)
     var results: [UsageEventResult] = []
-    var recorded = 0
-    var duplicates = 0
-    var errors = 0
-    for start in stride(from: 0, to: prepared.count, by: 500) {
+    for (index, start) in stride(from: 0, to: prepared.count, by: 500).enumerated() {
+      let chunk = Array(prepared[start..<min(start + 500, prepared.count)])
       var request = try Request(
-        "POST", ["usage", "events"],
-        body: Body(
-          register: register ? true : nil,
-          events: Array(prepared[start..<min(start + 500, prepared.count)])))
+        "POST", ["usage", "events"], body: Body(register: register ? true : nil, events: chunk))
       request.timeout = timeout
-      let chunk = prepared[start..<min(start + 500, prepared.count)]
+      request.idempotencyKey = batchKey.map { "\($0):\(index)" }
       for customer in Set(chunk.map(\.customer)) {
-        await core.writes.record(customer, at: Hooks.current.now())
+        await core.state.bump(customer, at: Hooks.current.now())
       }
-      let answer: UsageBatchResult = try await core.call(request)
-      for customer in Set(chunk.map(\.customer)) {
-        await core.writes.record(customer, at: Hooks.current.now())
+      do {
+        let answer: Answer = try await core.call(request)
+        for result in answer.results where chunk.indices.contains(result.index) {
+          results.append(
+            UsageEventResult(
+              index: start + result.index, outcome: result.outcome, id: result.id,
+              late: result.late,
+              error: result.error, idempotencyKey: chunk[result.index].idempotencyKey))
+        }
+      } catch let error as EntitlerError {
+        let failure: UsageEventError =
+          switch error {
+          case .api(let error): UsageEventError(code: error.code, message: error.message)
+          case .timeout(let error): UsageEventError(code: .timedOut, message: error.message)
+          default: UsageEventError(code: .connectionFailed, message: error.description)
+          }
+        results += chunk.enumerated().map { offset, event in
+          UsageEventResult(
+            index: start + offset, outcome: .error, id: nil, late: false, error: failure,
+            idempotencyKey: event.idempotencyKey)
+        }
       }
-      results += answer.results.map {
-        UsageEventResult(
-          index: start + $0.index, outcome: $0.outcome, id: $0.id, late: $0.late, error: $0.error)
-      }
-      recorded += answer.recorded
-      duplicates += answer.duplicates
-      errors += answer.errors
     }
+    results.sort { $0.index < $1.index }
     return UsageBatchResult(
-      results: results, recorded: recorded, duplicates: duplicates, errors: errors)
+      results: results,
+      recorded: results.filter { $0.outcome == .recorded }.count,
+      duplicates: results.filter { $0.outcome == .duplicate }.count,
+      errors: results.filter { $0.outcome == .error }.count)
   }
 
   /// The plans on sale to a signed-out visitor, for a pricing page, through the cache.
@@ -144,28 +177,18 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
 public struct UsageBatchEvent: Hashable, Sendable {
   /// The customer's external id.
   public var customer: String
-  /// The metered feature's key.
-  public var feature: String
-  /// The amount; the API's default is 1.
+  /// The metered feature.
+  public var feature: Feature<Metered>
+  /// The amount, from 1 to 2^53 − 1; the API's default is 1.
   public var amount: Int64?
   /// When the usage happened.
   public var occurredAt: Date?
   /// A key from your own unit of work; the SDK generates one otherwise.
   public var idempotencyKey: String?
 
-  /// Creates an event for a metered feature.
+  /// Creates an event.
   public init(
     customer: String, feature: Feature<Metered>, amount: Int64? = nil, occurredAt: Date? = nil,
-    idempotencyKey: String? = nil
-  ) {
-    self.init(
-      customer: customer, feature: feature.key, amount: amount, occurredAt: occurredAt,
-      idempotencyKey: idempotencyKey)
-  }
-
-  /// Creates an event for the metered feature with this key.
-  public init(
-    customer: String, feature: String, amount: Int64? = nil, occurredAt: Date? = nil,
     idempotencyKey: String? = nil
   ) {
     self.customer = customer
@@ -308,7 +331,7 @@ extension EntitlerClient where Credential == TokenCredential {
   /// Creates a client from a customer token. A fixed token cannot be refreshed, so a `401` fails.
   ///
   /// - Parameters:
-  ///   - token: A customer token your server minted with ``ServerCustomer/token(scopes:ttlSeconds:timeout:)``.
+  ///   - token: A customer token your server minted with ``ServerCustomer/token(scopes:ttlSeconds:idempotencyKey:timeout:)``.
   ///   - visitor: A visitor id to use instead of the one the client keeps.
   ///   - options: Timeouts, retries, the cache and the rest.
   public convenience init(
@@ -381,7 +404,7 @@ public struct SignedInCustomer: Customer, CustomStringConvertible, CustomReflect
 
   /// The id your app uses for the customer, from the latest answer: `nil` before the first one.
   public var id: String? {
-    get async { await handle.core.signedIn?.id }
+    get async { await handle.core.state.signedInID }
   }
 
   /// `SignedInCustomer(me)`.

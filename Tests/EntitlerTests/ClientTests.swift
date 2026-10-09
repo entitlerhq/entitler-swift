@@ -203,7 +203,7 @@ import Testing
       Issue.record("Expected an error")
     } catch EntitlerError.api(let error) {
       #expect(error.code == .httpError)
-      #expect(error.message == "Entitler request failed with HTTP 418.")
+      #expect(error.message == "Entitler answered with HTTP 418.")
       #expect(error.idempotencyKey == nil)
       #expect(error.listingGaps.isEmpty)
     }
@@ -218,7 +218,9 @@ import Testing
       _ = try await api.run { try await api.server().customer("u").providers() }
     } catch EntitlerError.api(let error) {
       #expect(error.status == 200)
-      #expect(error.code == .httpError)
+      #expect(error.code == .invalidResponse)
+      #expect(error.message == "Entitler sent an answer this SDK cannot read.")
+      #expect(error.underlyingError is DecodingError)
     }
     #expect(ErrorCode(rawValue: "brand_new_code").description == "brand_new_code")
   }

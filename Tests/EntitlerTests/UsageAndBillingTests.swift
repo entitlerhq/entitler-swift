@@ -18,7 +18,7 @@ import Testing
       #expect(api.last.header("Idempotency-Key")?.count == 36)
       #expect(api.last.json?.keys.sorted() == ["amount", "feature"])
       try await customer.recordUsage(
-        of: "ai_credits", amount: 2, mode: .observe,
+        of: Feature<Metered>("ai_credits"), amount: 2, mode: .observe,
         occurredAt: Date(timeIntervalSince1970: 1_782_898_200),
         register: true)
       let json = try #require(api.last.json)
@@ -39,7 +39,8 @@ import Testing
           outcome: outcome, refusal: outcome == "refused" ? #""over_allowance""# : "null"))
     }
     let result = try await api.run {
-      try await api.server().customer("u").recordUsage(of: "ai_credits", amount: 1)
+      try await api.server().customer("u").recordUsage(
+        of: Feature<Metered>("ai_credits"), amount: 1)
     }
     #expect(result.outcome.rawValue == outcome)
     #expect(result.outcome == UsageOutcome(rawValue: outcome))
@@ -77,18 +78,32 @@ import Testing
     }
   }
 
-  @Test func withHoldSettlesWhatWorkUsed() async throws {
-    let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#, amount: 10)) }
+  static let credits = Feature<Metered>("ai_credits")
+
+  static func holdAPI(settle: Reply? = nil, release: Reply? = nil, outcome: String = "held")
+    -> FakeAPI
+  {
+    FakeAPI { request in
+      if request.path.hasSuffix("/settle"), let settle { return settle }
+      if request.method == "DELETE", let release { return release }
+      return .json(Fixture.usage(outcome: outcome, holdID: #""h_1""#, amount: 10))
+    }
+  }
+
+  @Test func withHoldSettlesTheReportedAmountAndAnswersTheWorksResult() async throws {
+    let api = Self.holdAPI()
     let customer = try api.server().customer("u")
-    let used = try await api.run {
-      try await customer.withHold(
-        of: Feature<Metered>("ai_credits"), amount: 10, idempotencyKey: "job-1"
-      ) { hold in
+    let summary = try await api.run {
+      try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job-1") { hold in
         #expect(hold.holdID == "h_1")
-        return 7
+        #expect(hold.amount == 10)
+        #expect(hold.result.outcome == .held)
+        try hold.use(9)
+        try hold.use(7)
+        return "summary"
       }
     }
-    #expect(used == 7)
+    #expect(summary == "summary")
     #expect(
       api.requests.get.map(\.path) == [
         "/customers/u/usage/holds", "/customers/u/usage/holds/h_1/settle",
@@ -97,11 +112,46 @@ import Testing
     #expect(api.requests.get[0].header("Idempotency-Key") == "job-1")
   }
 
+  @Test func withHoldSettlesTheHeldAmountWhenNothingIsReported() async throws {
+    let api = Self.holdAPI(outcome: "duplicate")
+    _ = try await api.run {
+      try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { _ in 1 }
+    }
+    #expect(api.last.json?["amount"] as? Int == 10)
+  }
+
+  @Test func withHoldRefusesAmountsOutOfRange() async throws {
+    let api = Self.holdAPI()
+    let customer = try api.server().customer("u")
+    await #expect(
+      throws: ArgumentError(message: "Pass the amount used as a whole number of 0 or more.")
+    ) {
+      try await api.run {
+        try await customer.withHold(of: Self.credits, amount: 10) { hold in try hold.use(-1) }
+      }
+    }
+    #expect(api.last.method == "DELETE")
+    await #expect(
+      throws: ArgumentError(message: "Pass idempotencyKey as 1 to 193 printable ASCII characters.")
+    ) {
+      try await customer.withHold(
+        of: Self.credits, amount: 10, idempotencyKey: String(repeating: "k", count: 194)
+      ) { _ in 1 }
+    }
+    await #expect(
+      throws: ArgumentError(message: "Pass amount as a whole number from 1 to 9007199254740991.")
+    ) {
+      try await customer.withHold(of: Self.credits, amount: 0) { _ in 1 }
+    }
+  }
+
   @Test func withHoldRecordsTheExcessInObserveMode() async throws {
-    let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#, amount: 10)) }
+    let api = Self.holdAPI()
     let customer = try api.server().customer("u")
     _ = try await api.run {
-      try await customer.withHold(of: "ai_credits", amount: 10, idempotencyKey: "job-2") { _ in 15 }
+      try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job-2") { hold in
+        try hold.use(15)
+      }
     }
     let requests = api.requests.get
     #expect(requests.count == 3)
@@ -112,80 +162,144 @@ import Testing
     #expect(requests[2].header("Idempotency-Key") == "job-2:excess")
   }
 
+  @Test func withHoldRecordsEverythingWhenTheHoldExpired() async throws {
+    let api = Self.holdAPI(settle: .error(409, code: "hold_expired"))
+    _ = try await api.run {
+      try await api.server().customer("u").withHold(
+        of: Self.credits, amount: 10, idempotencyKey: "job-3"
+      ) { hold in
+        try hold.use(6)
+      }
+    }
+    #expect(api.last.path == "/customers/u/usage")
+    #expect(api.last.json?["amount"] as? Int == 6)
+    #expect(api.last.header("Idempotency-Key") == "job-3:excess")
+  }
+
   @Test func withHoldReleasesWhenWorkFails() async throws {
     struct WorkFailed: Error {}
-    let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#)) }
+    let api = Self.holdAPI()
     let customer = try api.server().customer("u")
     await #expect(throws: WorkFailed.self) {
       try await api.run {
-        try await customer.withHold(of: "ai_credits", amount: 10) { _ in throw WorkFailed() }
+        try await customer.withHold(of: Self.credits, amount: 10) { _ in throw WorkFailed() }
       }
     }
     #expect(api.last.method == "DELETE")
     #expect(api.last.path == "/customers/u/usage/holds/h_1")
   }
 
+  @Test func withHoldReleasesWhenCancelled() async throws {
+    let api = Self.holdAPI()
+    let customer = try api.server().customer("u")
+    let started = Box(false)
+    let task = Task {
+      try await api.run {
+        try await customer.withHold(of: Self.credits, amount: 10) { _ in
+          started.with { $0 = true }
+          try await Task.sleep(nanoseconds: 5_000_000_000)
+          return 1
+        }
+      }
+    }
+    while !started.get { try await Task.sleep(nanoseconds: 1_000_000) }
+    task.cancel()
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(api.last.method == "DELETE")
+  }
+
   @Test func failedReleaseGoesToOnError() async throws {
     struct WorkFailed: Error {}
     let errors = Box(0)
-    let api = FakeAPI { request in
-      request.method == "DELETE"
-        ? .error(404, code: "not_found") : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#))
-    }
+    let api = Self.holdAPI(release: .error(404, code: "not_found"))
     let customer = try api.server { $0.onError = { _ in errors.with { $0 += 1 } } }.customer("u")
     await #expect(throws: WorkFailed.self) {
       try await api.run {
-        try await customer.withHold(of: "ai_credits", amount: 10) { _ in throw WorkFailed() }
+        try await customer.withHold(of: Self.credits, amount: 10) { _ in throw WorkFailed() }
       }
     }
     #expect(errors.get == 1)
   }
 
-  @Test func withHoldNeverRunsWorkWhenRefused() async throws {
-    let api = FakeAPI { _ in .json(Fixture.usage(outcome: "refused", refusal: #""not_entitled""#)) }
+  @Test(arguments: ["refused", "settled", "released"])
+  func withHoldNeverRunsWorkWithoutAnOpenHold(outcome: String) async throws {
+    let api = FakeAPI { _ in
+      .json(
+        Fixture.usage(
+          outcome: outcome, refusal: outcome == "refused" ? #""not_entitled""# : "null",
+          holdID: #""h_1""#))
+    }
     let ran = Box(false)
     do {
       _ = try await api.run {
-        try await api.server().customer("u").withHold(of: "ai_credits", amount: 10) { _ in
+        try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { _ in
           ran.with { $0 = true }
           return 1
         }
       }
       Issue.record("Expected a refusal")
     } catch EntitlerError.usageRefused(let answer) {
-      #expect(answer.refusal == .notEntitled)
-      #expect(EntitlerError.usageRefused(answer).description.contains("not_entitled"))
+      #expect(answer.outcome.rawValue == outcome)
+      #expect(
+        EntitlerError.usageRefused(answer).description.contains(
+          outcome == "refused" ? "not_entitled" : outcome))
     }
     #expect(!ran.get)
   }
 
-  @Test func failedSettlementCarriesTheHoldID() async throws {
-    let api = FakeAPI { request in
-      request.path.hasSuffix("/settle")
-        ? .error(409, code: "hold_expired")
-        : .json(Fixture.usage(outcome: "held", holdID: #""h_7""#))
-    }
+  @Test func failedSettlementCarriesTheHoldAndTheResult() async throws {
+    let api = Self.holdAPI(settle: .error(400, code: "invalid_body"))
     do {
       _ = try await api.run {
-        try await api.server().customer("u").withHold(of: "ai_credits", amount: 10) { _ in 3 }
+        try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { hold in
+          try hold.use(12)
+          return "output"
+        }
       }
       Issue.record("Expected an error")
-    } catch EntitlerError.api(let error) {
-      #expect(error.code == .holdExpired)
-      #expect(error.holdID == "h_7")
+    } catch EntitlerError.usageSettlement(let error) {
+      #expect(error.holdID == "h_1")
+      #expect(error.amount == 10)
+      #expect(error.excess == 2)
+      #expect(error.result as? String == "output")
+      #expect(error.description.contains("h_1"))
+      #expect(EntitlerError.usageSettlement(error).errorDescription == error.message)
     }
   }
 
-  @Test func holdIDsAttachToEveryRequestError() {
-    let connection = EntitlerError.connection(
-      ConnectionError(underlyingError: URLError(.timedOut), idempotencyKey: nil))
-    if case .connection(let error) = connection.withHoldID("h") { #expect(error.holdID == "h") }
-    let timeout = EntitlerError.timeout(TimeoutError(timeout: 1, idempotencyKey: nil))
-    if case .timeout(let error) = timeout.withHoldID("h") { #expect(error.holdID == "h") }
-    let token = EntitlerError.token(TokenError(message: "x", underlyingError: nil))
-    if case .token(let error) = token.withHoldID("h") { #expect(error.holdID == "h") }
-    let snapshot = EntitlerError.snapshot(SnapshotError(code: .invalid, message: "x"))
-    if case .snapshot = snapshot.withHoldID("h") {} else { Issue.record("Changed kind") }
+  @Test func failedExcessCarriesTheExcess() async throws {
+    let api = FakeAPI { request in
+      request.path == "/customers/u/usage"
+        ? .error(400, code: "invalid_body")
+        : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#, amount: 10))
+    }
+    do {
+      _ = try await api.run {
+        try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { hold in
+          try hold.use(13)
+        }
+      }
+      Issue.record("Expected an error")
+    } catch EntitlerError.usageSettlement(let error) {
+      #expect(error.amount == 0)
+      #expect(error.excess == 3)
+    }
+  }
+
+  @Test func amountsAreCheckedBeforeAnyRequest() async throws {
+    let api = FakeAPI()
+    let customer = try api.server().customer("u")
+    await #expect(
+      throws: ArgumentError(message: "Pass amount as a whole number from 1 to 9007199254740991.")
+    ) {
+      try await customer.recordUsage(of: Self.credits, amount: 9_007_199_254_740_992)
+    }
+    await #expect(
+      throws: ArgumentError(message: "Pass amount as a whole number from 0 to the held amount.")
+    ) {
+      try await customer.settleUsage(hold: "h", amount: -1)
+    }
+    #expect(api.count == 0)
   }
 
   @Test func usageAndItsLogPage() async throws {
@@ -269,7 +383,9 @@ import Testing
     try await api.run {
       _ = try await server.customer("u").check("sso")
       api.advance(1)
-      _ = try await server.recordUsageBatch([UsageBatchEvent(customer: "u", feature: "ai_credits")])
+      _ = try await server.recordUsageBatch([
+        UsageBatchEvent(customer: "u", feature: Feature<Metered>("ai_credits"))
+      ])
       _ = try await server.customer("u").check("sso")
     }
     #expect(api.count == 3)
@@ -283,8 +399,8 @@ import Testing
     }
     let result = try await api.run {
       try await api.server().recordUsageBatch([
-        UsageBatchEvent(customer: "a", feature: "sso"),
-        UsageBatchEvent(customer: "b", feature: "ai_credits"),
+        UsageBatchEvent(customer: "a", feature: Feature<Metered>("sso")),
+        UsageBatchEvent(customer: "b", feature: Feature<Metered>("ai_credits")),
       ])
     }
     #expect(result.results[0].error?.code == .notMetered)
@@ -293,7 +409,9 @@ import Testing
     #expect(api.last.json?["register"] == nil)
     await #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer."))
     {
-      try await api.server().recordUsageBatch([UsageBatchEvent(customer: " ", feature: "f")])
+      try await api.server().recordUsageBatch([
+        UsageBatchEvent(customer: " ", feature: Feature<Metered>("f"))
+      ])
     }
   }
 
@@ -534,13 +652,13 @@ import Testing
     }
   }
 
-  @Test func planSpaceDecodes() async throws {
+  @Test func customerPlansDecode() async throws {
     let api = FakeAPI { _ in
       .json(
         #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","held":[{"plan":{"id":"p","key":"free","name":"Free","kind":"plan"},"product":{"key":"app","name":"App"},"version":1,"byDefault":true}],"options":[{"plan":{"id":"p2","key":"pro","name":"Pro","kind":"plan"},"product":{"key":"app","name":"App"},"move":"move","from":{"id":"p","key":"free","name":"Free"},"direction":"up","mode":"self-serve","selfServe":true,"disabledReason":null,"when":"now","impact":[{"kind":"Gains","text":"SSO"}],"skus":[]}],\#(Fixture.context)}"#
       )
     }
-    let space = try await api.run { try await api.server().customer("u").planSpace() }
+    let space = try await api.run { try await api.server().customer("u").plans() }
     #expect(space.held.first?.byDefault == true)
     let option = try #require(space.options.first)
     #expect(option.mode == .selfServe)

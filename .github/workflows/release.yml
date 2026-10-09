@@ -29,8 +29,7 @@ jobs:
     name: Checks
     needs: version
     uses: ./.github/workflows/ci.yml
-    secrets:
-      ENTITLER_TEST_KEY: ${{ secrets.ENTITLER_TEST_KEY }}
+    secrets: inherit
 
   release:
     name: GitHub release

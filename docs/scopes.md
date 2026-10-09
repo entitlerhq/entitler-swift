@@ -18,7 +18,7 @@ Each call asks again, so a newly granted scope shows without a restart. For an i
 | Scope | Lets a credential |
 | --- | --- |
 | `plans:read` | read pricing and the feature list |
-| `entitlements:read` | check features, list entitlements, read plan space and customer pricing, mint snapshots |
+| `entitlements:read` | check features, list entitlements, read customer plans and pricing, mint snapshots |
 | `usage:read` | read usage and holds |
 | `usage:write` | record usage, hold, settle and release |
 | `customers:register` | register customers |

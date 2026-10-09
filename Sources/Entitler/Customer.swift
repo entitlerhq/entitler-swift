@@ -35,10 +35,12 @@ public struct CustomerHandle: Sendable {
 
   func call<Answer: Decodable>(
     _ method: String, _ segments: [String], body: (any Encodable)? = nil,
-    idempotencyKey: String? = nil, timeout: TimeInterval?
+    idempotencyKey: String? = nil, changesAnswers: Bool = true, timeout: TimeInterval?
   ) async throws -> Answer {
-    try await core.call(
-      request(method, segments, body: body, idempotencyKey: idempotencyKey, timeout: timeout))
+    var request = try request(
+      method, segments, body: body, idempotencyKey: idempotencyKey, timeout: timeout)
+    request.changesAnswers = changesAnswers
+    return try await core.call(request)
   }
 
   func read<Answer: Decodable>(_ segments: [String], visitor: String? = nil, timeout: TimeInterval?)
@@ -69,6 +71,38 @@ struct SnapshotBody: Encodable {
 
 func requireFeature(_ key: String) throws -> String { try require(key, Messages.feature) }
 
+/// The hold `withHold(of:amount:)` placed, passed to its work.
+///
+/// Report the total the work really used with ``use(_:)``; a later call replaces an earlier one.
+/// When the work never reports an amount, the held amount is settled.
+public final class OpenHold: Sendable {
+  /// The answer that placed the hold.
+  public let result: UsageResult
+  /// The hold's id.
+  public let holdID: String
+  private let used = LockedValue<Int64?>(nil)
+
+  init(result: UsageResult, holdID: String) {
+    self.result = result
+    self.holdID = holdID
+  }
+
+  /// The amount held.
+  public var amount: Int64 { result.amount }
+
+  /// Reports the total amount the work used, from 0 to 2^53 − 1.
+  ///
+  /// - Throws: ``ArgumentError`` for an amount out of range.
+  public func use(_ amount: Int64) throws {
+    guard (0...maxAmount).contains(amount) else {
+      throw ArgumentError(message: Messages.amountUsed)
+    }
+    used.set(amount)
+  }
+
+  var reported: Int64? { used.read() }
+}
+
 extension Customer {
   /// Checks one feature, through the cache.
   ///
@@ -92,8 +126,8 @@ extension Customer {
 
   /// Whether the customer is entitled to a feature, answering `default` instead of failing.
   ///
-  /// Any failure, Entitler being unreachable included, answers `default` and goes to
-  /// ``EntitlerOptions/onError``; a stale answer counts. Fail closed with `false` for paid
+  /// Any failure, Entitler being unreachable or a blank key included, answers `default` and goes
+  /// to ``EntitlerOptions/onError``; a stale answer counts. Fail closed with `false` for paid
   /// features; pass `true` only where losing a sale is worse than giving the feature away.
   /// Cancelling the task answers `default` without calling `onError`.
   public func isEntitled<Kind>(
@@ -103,17 +137,16 @@ extension Customer {
   }
 
   /// Whether the customer is entitled to the feature with this key, answering `default` instead
-  /// of failing. A blank key is a programming error and stops in `preconditionFailure`.
+  /// of failing.
   public func isEntitled(to key: String, default fallback: Bool, timeout: TimeInterval? = nil) async
     -> Bool
   {
-    guard !key.trimmed.isEmpty else { preconditionFailure(Messages.feature) }
     do {
       return try await check(key, timeout: timeout).entitled
-    } catch let error as EntitlerError {
-      handle.core.options.onError?(error)
+    } catch is CancellationError {
       return fallback
     } catch {
+      if !Task.isCancelled { handle.core.report(error) }
       return fallback
     }
   }
@@ -123,23 +156,27 @@ extension Customer {
     try await handle.read(["entitlements"], timeout: timeout)
   }
 
-  /// The customer's plans and every plan and add-on they could move to, through the cache.
-  public func planSpace(timeout: TimeInterval? = nil) async throws -> PlanSpace {
+  /// The plans the customer holds and every plan they can move to, through the cache.
+  ///
+  /// On an in-app client it needs the organisation's customer portal capability, or answers
+  /// `409 limit_reached`.
+  public func plans(timeout: TimeInterval? = nil) async throws -> CustomerPlans {
     try await handle.read(["plans"], timeout: timeout)
   }
 
   /// The plans on sale to the customer, through their track, through the cache.
   ///
   /// - Parameters:
-  ///   - visitor: On the server, the visitor id the customer had while signed out, so they
-  ///     keep their experiment arm. An in-app client sends its own.
+  ///   - visitor: On the server, the visitor id the customer had while signed out, so they keep
+  ///     their experiment arm. An in-app client sends its own unless this replaces it.
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing
   {
     try await handle.read(["pricing"], visitor: visitor, timeout: timeout)
   }
 
-  /// The customer's meters and the first page of their usage log.
+  /// The customer's meters and the first page of their usage log; ``usageLog(timeout:)`` iterates
+  /// every entry.
   public func usage(cursor: String? = nil, timeout: TimeInterval? = nil) async throws
     -> CustomerUsage
   {
@@ -165,6 +202,8 @@ extension Customer {
   /// let result = try await customer.recordUsage(of: Features.aiCredits, amount: 3, mode: .observe)
   /// ```
   ///
+  /// Declare a plain key as `Feature<Metered>("ai_credits")`.
+  ///
   /// - Parameters:
   ///   - feature: The metered feature.
   ///   - amount: A whole number in the feature's unit, from 1 to 2^53 − 1.
@@ -180,21 +219,9 @@ extension Customer {
     of feature: Feature<Metered>, amount: Int64, mode: UsageMode? = nil, occurredAt: Date? = nil,
     register: Bool = false, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
-    try await recordUsage(
-      of: feature.key, amount: amount, mode: mode, occurredAt: occurredAt, register: register,
-      idempotencyKey: idempotencyKey, timeout: timeout)
-  }
-
-  /// Records usage of the metered feature with this key. The API refuses other features with
-  /// ``ErrorCode/notMetered``.
-  @discardableResult
-  public func recordUsage(
-    of key: String, amount: Int64, mode: UsageMode? = nil, occurredAt: Date? = nil,
-    register: Bool = false, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
-  ) async throws -> UsageResult {
     let body = UsageBody(
-      feature: try requireFeature(key), amount: amount, mode: mode, occurredAt: occurredAt,
-      register: register ? true : nil)
+      feature: try requireFeature(feature.key), amount: try validAmount(amount), mode: mode,
+      occurredAt: occurredAt, register: register ? true : nil)
     return try await handle.call(
       "POST", ["usage"], body: body, idempotencyKey: idempotencyKey, timeout: timeout)
   }
@@ -203,7 +230,7 @@ extension Customer {
   ///
   /// - Parameters:
   ///   - feature: The metered feature.
-  ///   - amount: How much to hold.
+  ///   - amount: How much to hold, from 1 to 2^53 − 1.
   ///   - ttlSeconds: How long the hold lasts, 1 to 3600 (the API's default is 300).
   ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
   ///     recognised. The SDK generates one otherwise.
@@ -212,17 +239,9 @@ extension Customer {
     of feature: Feature<Metered>, amount: Int64, ttlSeconds: Int? = nil,
     idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
-    try await holdUsage(
-      of: feature.key, amount: amount, ttlSeconds: ttlSeconds, idempotencyKey: idempotencyKey,
-      timeout: timeout)
-  }
-
-  /// Holds an amount of the metered feature with this key.
-  public func holdUsage(
-    of key: String, amount: Int64, ttlSeconds: Int? = nil, idempotencyKey: String? = nil,
-    timeout: TimeInterval? = nil
-  ) async throws -> UsageResult {
-    let body = UsageBody(feature: try requireFeature(key), amount: amount, ttlSeconds: ttlSeconds)
+    let body = UsageBody(
+      feature: try requireFeature(feature.key), amount: try validAmount(amount),
+      ttlSeconds: ttlSeconds)
     return try await handle.call(
       "POST", ["usage", "holds"], body: body, idempotencyKey: idempotencyKey, timeout: timeout)
   }
@@ -232,7 +251,10 @@ extension Customer {
   public func settleUsage(
     hold holdID: String, amount: Int64, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
-    try await handle.call(
+    guard (0...maxAmount).contains(amount) else {
+      throw ArgumentError(message: Messages.settledAmount)
+    }
+    return try await handle.call(
       "POST", ["usage", "holds", require(holdID, Messages.hold), "settle"],
       body: AmountBody(amount: amount), idempotencyKey: idempotencyKey, timeout: timeout)
   }
@@ -253,69 +275,96 @@ extension Customer {
       "GET", ["usage", "holds", require(holdID, Messages.hold)], timeout: timeout)
   }
 
-  /// Holds `amount`, runs `work`, and settles the amount `work` answers.
+  /// Holds `amount`, runs `work`, and settles the amount the work reports.
   ///
   /// ```swift
-  /// let tokens = try await customer.withHold(of: Features.aiCredits, amount: 500) { hold in
-  ///   try await summarise(document).tokens
+  /// let summary = try await customer.withHold(of: Features.aiCredits, amount: 500) { hold in
+  ///   let answer = try await summarise(document)
+  ///   try hold.use(answer.tokens)
+  ///   return answer.summary
   /// }
   /// ```
   ///
-  /// A refused hold never runs `work` and throws ``EntitlerError/usageRefused(_:)``. When `work`
-  /// throws, the hold is released (a failed release goes to ``EntitlerOptions/onError``, since
-  /// the hold expires on its own) and the error propagates. An amount past the hold is recorded
-  /// in observe mode with the hold's key plus `:excess`. A failed settlement throws an error
-  /// carrying the hold's id, so the app can settle again.
+  /// - `work` runs only when the hold is placed, or replays a hold that is still open. A refused
+  ///   hold, or a replay of one settled, released or expired, throws
+  ///   ``EntitlerError/usageRefused(_:)`` without running it.
+  /// - The amount reported with ``OpenHold/use(_:)`` is settled, up to the held amount; the held
+  ///   amount when none is reported. Any excess is recorded in observe mode under the hold's key
+  ///   plus `:excess`, and so is the whole amount when the hold expired while `work` ran.
+  /// - When `work` throws or the task is cancelled, the hold is released outside the cancelled
+  ///   task, then the error propagates. A failed release goes to ``EntitlerOptions/onError``,
+  ///   since the hold expires on its own.
+  /// - When settling or recording the excess fails, it throws
+  ///   ``EntitlerError/usageSettlement(_:)`` carrying `work`'s result.
   ///
-  /// - Returns: The amount `work` answered.
-  @discardableResult
-  public func withHold(
+  /// The accounting happens exactly once per key, but `work` does not: two callers using the same
+  /// key at the same time may both run it. Coordinate `work` yourself when it must run once.
+  ///
+  /// - Parameters:
+  ///   - feature: The metered feature.
+  ///   - amount: How much to hold, from 1 to 2^53 − 1.
+  ///   - ttlSeconds: How long the hold lasts, 1 to 3600 (the API's default is 300).
+  ///   - idempotencyKey: A key from your own unit of work, 1 to 193 printable ASCII characters,
+  ///     so `:excess` still fits. The SDK generates one otherwise.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
+  ///   - work: The work, passed the hold.
+  /// - Returns: `work`'s result.
+  public func withHold<Result: Sendable>(
     of feature: Feature<Metered>, amount: Int64, ttlSeconds: Int? = nil,
     idempotencyKey: String? = nil, timeout: TimeInterval? = nil,
-    _ work: (UsageResult) async throws -> Int64
-  ) async throws -> Int64 {
-    try await withHold(
-      of: feature.key, amount: amount, ttlSeconds: ttlSeconds, idempotencyKey: idempotencyKey,
-      timeout: timeout, work)
-  }
-
-  /// Holds an amount of the metered feature with this key, runs `work`, and settles it.
-  @discardableResult
-  public func withHold(
-    of key: String, amount: Int64, ttlSeconds: Int? = nil, idempotencyKey: String? = nil,
-    timeout: TimeInterval? = nil, _ work: (UsageResult) async throws -> Int64
-  ) async throws -> Int64 {
-    let idempotencyKey = try validIdempotencyKey(idempotencyKey) ?? UUID().uuidString.lowercased()
-    let hold = try await holdUsage(
-      of: key, amount: amount, ttlSeconds: ttlSeconds, idempotencyKey: idempotencyKey,
-      timeout: timeout)
-    guard hold.outcome != .refused, let holdID = hold.holdID else {
-      throw EntitlerError.usageRefused(hold)
+    _ work: (OpenHold) async throws -> Result
+  ) async throws -> Result {
+    let key =
+      try validIdempotencyKey(idempotencyKey, maxLength: 193, message: Messages.holdKey)
+      ?? UUID().uuidString.lowercased()
+    let placed = try await holdUsage(
+      of: feature, amount: amount, ttlSeconds: ttlSeconds, idempotencyKey: key, timeout: timeout)
+    guard placed.outcome == .held || placed.outcome == .duplicate, let holdID = placed.holdID else {
+      throw EntitlerError.usageRefused(placed)
     }
-    let used: Int64
+    let hold = OpenHold(result: placed, holdID: holdID)
+    let result: Result
     do {
-      used = try await work(hold)
+      result = try await work(hold)
+      try Task.checkCancellation()
     } catch {
       let customer = self
-      let release = Task { try await customer.releaseUsage(hold: holdID, timeout: timeout) }
-      do {
-        _ = try await release.value
-      } catch let failure as EntitlerError {
-        handle.core.options.onError?(failure)
-      }
+      let core = handle.core
+      await Task {
+        do {
+          try await customer.releaseUsage(hold: holdID, timeout: timeout)
+        } catch {
+          core.report(error)
+        }
+      }.value
       throw error
     }
+    let used = hold.reported ?? placed.amount
+    var settle = min(used, placed.amount)
+    var excess = used - settle
     do {
-      try await settleUsage(hold: holdID, amount: min(used, hold.amount), timeout: timeout)
+      try await settleUsage(hold: holdID, amount: settle, timeout: timeout)
+      settle = 0
+    } catch EntitlerError.api(let error) where error.code == .holdExpired {
+      settle = 0
+      excess = used
     } catch let error as EntitlerError {
-      throw error.withHoldID(holdID)
+      throw EntitlerError.usageSettlement(
+        UsageSettlementError(
+          holdID: holdID, amount: settle, excess: excess > 0 ? excess : nil, underlyingError: error,
+          result: result))
     }
-    if used > hold.amount {
+    guard excess > 0 else { return result }
+    do {
       try await recordUsage(
-        of: key, amount: used - hold.amount, mode: .observe,
-        idempotencyKey: idempotencyKey + ":excess", timeout: timeout)
+        of: feature, amount: excess, mode: .observe, idempotencyKey: key + ":excess",
+        timeout: timeout)
+    } catch let error as EntitlerError {
+      throw EntitlerError.usageSettlement(
+        UsageSettlementError(
+          holdID: holdID, amount: 0, excess: excess, underlyingError: error, result: result))
     }
-    return used
+    return result
   }
 
   /// Signs the customer's entitlements, so an app can check them offline until it expires.
@@ -325,12 +374,17 @@ extension Customer {
   ///
   /// - Parameters:
   ///   - ttlSeconds: How long it lasts, at most the project's offline days.
+  ///   - idempotencyKey: Sent as `Idempotency-Key`; minting writes nothing.
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
-  public func snapshot(ttlSeconds: Int? = nil, timeout: TimeInterval? = nil) async throws
-    -> IssuedSnapshot
+  public func snapshot(
+    ttlSeconds: Int? = nil, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+  )
+    async throws -> IssuedSnapshot
   {
     try await handle.call(
-      "POST", ["snapshots"], body: SnapshotBody(ttlSeconds: ttlSeconds), timeout: timeout)
+      "POST", ["snapshots"], body: SnapshotBody(ttlSeconds: ttlSeconds),
+      idempotencyKey: idempotencyKey,
+      changesAnswers: false, timeout: timeout)
   }
 }
 

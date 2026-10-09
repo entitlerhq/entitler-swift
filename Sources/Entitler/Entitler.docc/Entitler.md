@@ -63,11 +63,15 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``Entitlement``
 - ``EntitlementSource``
 - ``Upgrade``
+- ``CustomerPlans``
+- ``MoveOption``
+- ``HeldPlan``
 
 ### Usage
 
 - ``UsageResult``
 - ``UsageHold``
+- ``OpenHold``
 - ``UsageMode``
 - ``UsageOutcome``
 - ``UsageRefusal``
@@ -104,6 +108,7 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``EntitlerError``
 - ``APIError``
 - ``ErrorCode``
+- ``UsageSettlementError``
 - ``ConnectionError``
 - ``TimeoutError``
 - ``TokenError``

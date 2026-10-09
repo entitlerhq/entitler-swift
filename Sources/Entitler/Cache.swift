@@ -2,30 +2,64 @@ import Foundation
 
 /// A store for kept answers, after `NSCache`: implement it to share answers through Redis or keep
 /// them on disk across launches. It must be safe for concurrent use.
+///
+/// A thrown ``entry(forKey:)`` counts as a miss and a thrown ``setEntry(_:forKey:timeToLive:)`` is
+/// skipped; each goes to ``EntitlerOptions/onError`` and neither fails the call.
 public protocol CacheStore: Sendable {
   /// The entry kept under a key, or `nil`.
-  func entry(forKey key: String) async -> CacheEntry?
+  func entry(forKey key: String) async throws -> CacheEntry?
+
   /// Keeps an entry under a key, replacing any before it.
-  func setEntry(_ entry: CacheEntry, forKey key: String) async
+  ///
+  /// - Parameters:
+  ///   - entry: The entry to keep.
+  ///   - key: A lowercase hex SHA-256, never holding a credential.
+  ///   - timeToLive: How long the entry is useful, in seconds: the client's `staleFor` plus the
+  ///     answer's `max-age`. Stores that expire entries should expire it after that.
+  func setEntry(_ entry: CacheEntry, forKey key: String, timeToLive: TimeInterval) async throws
 }
 
-/// A kept answer. Keys are SHA-256 hashes and never contain a credential.
+/// A kept answer: plain values, so a store can keep it as JSON.
+///
+/// Entries are private to this SDK: sharing a store with SDKs in other languages is not
+/// supported.
 public struct CacheEntry: Codable, Hashable, Sendable {
-  /// The answer's body.
-  public var body: Data
+  /// The entry format, 1.
+  public var v: Int
+  /// The answer's body, as raw JSON text.
+  public var body: String
   /// The answer's `ETag`.
   public var etag: String?
-  /// How long the answer is fresh, in seconds, from `Cache-Control: max-age`.
-  public var maxAge: TimeInterval?
+  /// The answer's `Cache-Control` header.
+  public var cacheControl: String?
+  /// The answer's `Age` header, in seconds.
+  public var age: Int?
   /// When the answer was received.
   public var receivedAt: Date
 
   /// Creates an entry.
-  public init(body: Data, etag: String?, maxAge: TimeInterval?, receivedAt: Date) {
+  public init(body: String, etag: String?, cacheControl: String?, age: Int?, receivedAt: Date) {
+    v = 1
     self.body = body
     self.etag = etag
-    self.maxAge = maxAge
+    self.cacheControl = cacheControl
+    self.age = age
     self.receivedAt = receivedAt
+  }
+
+  var directives: [String] {
+    (cacheControl ?? "").lowercased().split(separator: ",").map {
+      $0.trimmingCharacters(in: .whitespaces)
+    }
+  }
+
+  var maxAge: TimeInterval? {
+    directives.first { $0.hasPrefix("max-age=") }.flatMap { TimeInterval($0.dropFirst(8)) }
+  }
+
+  func isFresh(at now: Date) -> Bool {
+    guard let maxAge, !directives.contains("no-cache") else { return false }
+    return now.timeIntervalSince(receivedAt) + TimeInterval(age ?? 0) < maxAge
   }
 }
 
@@ -48,8 +82,8 @@ public actor MemoryCacheStore: CacheStore {
     return kept.entry
   }
 
-  /// Keeps an entry, dropping the least recently used one when full.
-  public func setEntry(_ entry: CacheEntry, forKey key: String) {
+  /// Keeps an entry, dropping the least recently used one when full. Entries never expire here.
+  public func setEntry(_ entry: CacheEntry, forKey key: String, timeToLive: TimeInterval) {
     clock += 1
     entries[key] = (entry, clock)
     if entries.count > capacity, let oldest = entries.min(by: { $0.value.used < $1.value.used }) {

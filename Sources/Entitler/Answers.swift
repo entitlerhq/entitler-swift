@@ -247,7 +247,7 @@ public struct Entitlements: Codable, Hashable, Sendable, StaleMarking {
   public func has(_ key: String) -> Bool { self[key]?.entitled ?? false }
 }
 
-/// A plan the customer holds, in ``PlanSpace``.
+/// A plan the customer holds, in ``CustomerPlans``.
 public struct HeldPlan: Codable, Hashable, Sendable {
   /// The plan.
   public let plan: PlanRef
@@ -293,7 +293,7 @@ public struct OfferedSKU: Codable, Hashable, Sendable {
   public let price: ProviderPrice?
 }
 
-/// A plan or add-on a customer could move to, in ``PlanSpace``.
+/// A plan or add-on a customer can move to, in ``CustomerPlans``.
 public struct MoveOption: Codable, Hashable, Sendable {
   /// The plan or add-on.
   public let plan: PlanRef
@@ -319,8 +319,8 @@ public struct MoveOption: Codable, Hashable, Sendable {
   public let skus: [OfferedSKU]
 }
 
-/// The customer's plans and every plan and add-on they could move to.
-public struct PlanSpace: Codable, Hashable, Sendable, StaleMarking {
+/// The plans and add-ons a customer holds, and every one they can move to.
+public struct CustomerPlans: Codable, Hashable, Sendable, StaleMarking {
   /// The customer's external id.
   public let customer: String
   /// The instant the answer is for.
@@ -508,7 +508,7 @@ public struct FeatureListing: Codable, Hashable, Sendable {
 }
 
 /// The features of the catalogue the All customers track serves.
-public struct FeatureList: Codable, Hashable, Sendable {
+public struct FeatureList: Codable, Hashable, Sendable, StaleMarking {
   /// The environment the answer comes from.
   public let environment: AnswerEnvironment
   /// The track read.
@@ -519,6 +519,12 @@ public struct FeatureList: Codable, Hashable, Sendable {
   public let change: String?
   /// The features.
   public let features: [FeatureListing]
+  /// True only when the SDK answered from a kept copy because Entitler was unreachable.
+  public internal(set) var stale = false
+
+  enum CodingKeys: String, CodingKey {
+    case environment, track, release, change, features
+  }
 }
 
 /// A page of a paged answer.
@@ -719,6 +725,8 @@ public struct UsageEventResult: Codable, Hashable, Sendable {
   public let late: Bool
   /// Why it was not recorded.
   public let error: UsageEventError?
+  /// The event's idempotency key, to resend it safely.
+  public let idempotencyKey: String
 }
 
 /// What a batch did: one result per event, in input order, and the totals.
