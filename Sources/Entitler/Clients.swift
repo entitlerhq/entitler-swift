@@ -347,6 +347,11 @@ public struct SignedInCustomer: Customer, CustomStringConvertible, CustomReflect
   /// The client and customer this value acts through. Opaque.
   public let handle: CustomerHandle
 
+  /// The id your app uses for the customer, from the latest answer: `nil` before the first one.
+  public var id: String? {
+    get async { await handle.core.signedIn?.id }
+  }
+
   /// `SignedInCustomer(me)`.
   public var description: String { "SignedInCustomer(me)" }
 

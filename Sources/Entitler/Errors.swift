@@ -34,7 +34,7 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   /// The message of the error this case carries.
   public var description: String {
     switch self {
-    case .api(let error): error.message
+    case .api(let error): error.description
     case .connection(let error): error.message
     case .timeout(let error): error.message
     case .token(let error): error.message

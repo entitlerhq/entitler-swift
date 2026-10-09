@@ -70,15 +70,6 @@ struct SnapshotBody: Encodable {
 func requireFeature(_ key: String) throws -> String { try require(key, Messages.feature) }
 
 extension Customer {
-  /// The id your app uses for the customer: given on the server, and in an app the one the
-  /// latest answer named (`nil` before the first answer).
-  public var id: String? {
-    get async {
-      guard let signedIn = handle.core.signedIn else { return handle.path }
-      return await signedIn.id
-    }
-  }
-
   /// Checks one feature, through the cache.
   ///
   /// ```swift

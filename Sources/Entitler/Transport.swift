@@ -15,6 +15,9 @@ struct Hooks: Sendable {
     try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
   }
   var random: @Sendable (ClosedRange<Double>) -> Double = { Double.random(in: $0) }
+  var deadline: @Sendable (TimeInterval) async throws -> Void = { seconds in
+    try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+  }
 
   @TaskLocal static var current = Hooks()
 }
@@ -274,7 +277,7 @@ final class Core: Sendable, CustomReflectable {
       let (body, response) = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) { group in
         group.addTask { try await session.data(for: request) }
         group.addTask {
-          try await hooks.sleep(timeout)
+          try await hooks.deadline(timeout)
           return nil
         }
         defer { group.cancelAll() }
