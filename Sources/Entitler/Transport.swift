@@ -57,6 +57,7 @@ struct Response: Sendable {
   let cacheControl: String?
   let age: Int?
   let retryAfter: TimeInterval?
+  var requestID: String? = nil
 
   var noStore: Bool { cacheControl?.lowercased().contains("no-store") ?? false }
 }
@@ -163,13 +164,18 @@ final class Core: Sendable, CustomReflectable {
 
   private func decode<Answer: Decodable>(_ response: Response) throws -> Answer {
     do {
-      return try JSON.decoder().decode(Answer.self, from: response.body)
+      let answer = try JSON.decoder().decode(Answer.self, from: response.body)
+      if let checked = answer as? any MeterChecked, !checked.hasValidMeters {
+        throw DecodingError.dataCorrupted(
+          DecodingError.Context(codingPath: [], debugDescription: "A meter's remaining is true."))
+      }
+      return answer
     } catch {
       throw EntitlerError.api(
         APIError(
           status: response.status, code: .invalidResponse,
-          message: "Entitler sent an answer this SDK cannot read.", requestID: nil, retryAfter: nil,
-          idempotencyKey: nil, payment: nil, listingGaps: [], listingProblems: [],
+          message: "Entitler sent an answer this SDK cannot read.", requestID: response.requestID,
+          retryAfter: nil, idempotencyKey: nil, payment: nil, listingGaps: [], listingProblems: [],
           underlyingError: error))
     }
   }
@@ -207,7 +213,8 @@ final class Core: Sendable, CustomReflectable {
           throw EntitlerError.api(
             APIError(
               status: 304, code: .httpError, message: "Entitler answered with HTTP 304.",
-              requestID: nil, retryAfter: nil, idempotencyKey: nil, payment: nil, listingGaps: [],
+              requestID: response.requestID, retryAfter: nil, idempotencyKey: nil, payment: nil,
+              listingGaps: [],
               listingProblems: []))
         }
         entry = CacheEntry(
@@ -478,7 +485,11 @@ final class Core: Sendable, CustomReflectable {
 }
 
 func sha256(_ text: String) -> String {
-  SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+  sha256(Data(text.utf8))
+}
+
+func sha256(_ data: Data) -> String {
+  SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
 func jsonString(_ text: String) -> String {
@@ -534,7 +545,8 @@ extension Response {
       age: http.value(forHTTPHeaderField: "Age").flatMap { Int($0.trimmed) },
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
         Entitler.retryAfter($0, now: now)
-      })
+      },
+      requestID: http.value(forHTTPHeaderField: "x-request-id"))
   }
 }
 

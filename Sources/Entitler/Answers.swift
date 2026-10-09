@@ -1309,3 +1309,31 @@ public struct ListingProblem: Codable, Hashable, Sendable {
   /// What is wrong.
   public let problem: ListingProblemKind
 }
+
+extension Check: MeterChecked {
+  var hasValidMeters: Bool { remaining.isMeterAmount }
+}
+
+extension MeteredCheck: MeterChecked {
+  var hasValidMeters: Bool { remaining != .on }
+}
+
+extension Entitlement: MeterChecked {
+  var hasValidMeters: Bool { remaining.isMeterAmount }
+}
+
+extension Entitlements: MeterChecked {
+  var hasValidMeters: Bool { items.allSatisfy(\.hasValidMeters) }
+}
+
+extension FeatureUsage: MeterChecked {
+  var hasValidMeters: Bool { remaining.isMeterAmount }
+}
+
+extension CustomerUsage: MeterChecked {
+  var hasValidMeters: Bool { features.allSatisfy(\.hasValidMeters) }
+}
+
+extension UsageResult: MeterChecked {
+  var hasValidMeters: Bool { remaining.isMeterAmount }
+}

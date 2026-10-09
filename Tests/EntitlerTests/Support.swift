@@ -67,15 +67,18 @@ final class Box<Value>: @unchecked Sendable {
 
 /// A fake API: answers each request from a handler and records it.
 final class FakeAPI: Sendable {
-  let host = "t\(UUID().uuidString.prefix(8).lowercased()).test"
+  let host: String
   let requests = Box<[Recorded]>([])
   let handler: Box<@Sendable (Recorded) -> Reply>
   let clock = Box(Date(timeIntervalSince1970: 1_800_000_000))
   let sleeps = Box<[TimeInterval]>([])
 
-  init(_ handler: @escaping @Sendable (Recorded) -> Reply = { _ in .json("{}") }) {
+  init(
+    host: String? = nil, _ handler: @escaping @Sendable (Recorded) -> Reply = { _ in .json("{}") }
+  ) {
     self.handler = Box(handler)
-    FakeProtocol.apis.with { $0[host] = self }
+    self.host = host ?? "t\(UUID().uuidString.prefix(8).lowercased()).test"
+    FakeProtocol.apis.with { $0[self.host] = self }
   }
 
   convenience init(replies: [Reply]) {
@@ -87,7 +90,7 @@ final class FakeAPI: Sendable {
     self.handler.with { $0 = handler }
   }
 
-  var baseURL: URL { URL(string: "https://\(host)/")! }
+  var baseURL: URL { URL(string: host == "*" ? "https://api.entitler.dev" : "https://\(host)/")! }
 
   var session: URLSession {
     let configuration = URLSessionConfiguration.ephemeral
@@ -138,7 +141,8 @@ final class FakeProtocol: URLProtocol {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
-    guard let url = request.url, let api = Self.apis.get[url.host ?? ""] else {
+    guard let url = request.url, let api = Self.apis.get[url.host ?? ""] ?? Self.apis.get["*"]
+    else {
       client?.urlProtocol(self, didFailWithError: URLError(.cannotFindHost))
       return
     }

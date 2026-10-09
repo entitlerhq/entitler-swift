@@ -67,6 +67,14 @@ protocol StaleMarking {
   var stale: Bool { get set }
 }
 
+protocol MeterChecked {
+  var hasValidMeters: Bool { get }
+}
+
+extension Optional where Wrapped == FeatureValue {
+  var isMeterAmount: Bool { self != .on }
+}
+
 func markedStale<Value>(_ value: Value) -> Value {
   guard var marked = value as? any StaleMarking else { return value }
   marked.stale = true
@@ -104,8 +112,12 @@ func parseInstant(_ text: String) -> Date? {
   guard year.count == 5, year.last == "-", year.dropLast().allSatisfy(\.isASCIIDigit),
     year.dropLast() != "0000"
   else { return nil }
-  return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text))
-    ?? (try? Date.ISO8601FormatStyle().parse(text))
+  let cycles = max(0, (1999 - Int(year.dropLast())!) / 400)
+  let shifted = String(format: "%04d", Int(year.dropLast())! + cycles * 400) + text.dropFirst(4)
+  let date =
+    (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(shifted))
+    ?? (try? Date.ISO8601FormatStyle().parse(shifted))
+  return date?.addingTimeInterval(-Double(cycles) * 146_097 * 86_400)
 }
 
 func formatInstant(_ date: Date) -> String {
@@ -117,7 +129,7 @@ extension Character {
 }
 
 extension String {
-  var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+  var trimmed: String { trimmingCharacters(in: CharacterSet(charactersIn: " \t\r\n")) }
 
   var componentEncoded: String {
     var allowed = CharacterSet(charactersIn: "-_.!~*'()")

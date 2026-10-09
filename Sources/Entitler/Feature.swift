@@ -88,10 +88,10 @@ public enum FeatureValue: Hashable, Sendable, Codable, CustomStringConvertible {
   /// Unlimited (JSON `"unlimited"`).
   case unlimited
 
-  /// Decodes `true`, a whole number or `"unlimited"`.
+  /// Decodes `true`, a whole number from 0, or `"unlimited"`.
   public init(from decoder: any Decoder) throws {
     let container = try decoder.singleValueContainer()
-    if let amount = try? container.decode(Int64.self) {
+    if let amount = try? container.decode(Int64.self), amount >= 0 {
       self = .amount(amount)
     } else if let on = try? container.decode(Bool.self), on {
       self = .on

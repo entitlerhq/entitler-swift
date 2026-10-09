@@ -144,6 +144,7 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
   let segments = token.split(separator: ".", omittingEmptySubsequences: false)
   guard segments.count == 3,
     let headerData = Base64URL.decode(segments[0]),
+    Base64URL.decode(segments[1]) != nil,
     let signature = Base64URL.decode(segments[2]),
     let header = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
     header["typ"] as? String == "entitlements+jwt", header["alg"] as? String == "ES256",
@@ -164,7 +165,10 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
   else { throw changed }
 
   guard let payload = Base64URL.decode(segments[1]),
-    let claims = try? JSON.decoder().decode(SnapshotClaims.self, from: payload)
+    let claims = try? JSON.decoder().decode(SnapshotClaims.self, from: payload),
+    let fields = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+    fields.keys.contains("release"), fields.keys.contains("change"),
+    claims.entitlements.allSatisfy(\.hasValidMeters)
   else { throw malformed }
   guard claims.iss == expected.issuer else {
     throw fail(.invalid, "This snapshot was not issued by \(expected.issuer).")
