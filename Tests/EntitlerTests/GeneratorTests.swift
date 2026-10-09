@@ -14,7 +14,8 @@ enum Golden {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       try text.write(to: url, atomically: true, encoding: .utf8)
     }
-    #expect(text == (try String(contentsOf: url, encoding: .utf8)))
+    let golden = try String(contentsOf: url, encoding: .utf8)
+    #expect(text == golden)
   }
 }
 

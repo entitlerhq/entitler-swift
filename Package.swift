@@ -12,7 +12,7 @@ let package = Package(
     .plugin(name: "entitler-generate", targets: ["EntitlerGenerate"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"6.0.0")
+    .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"4.4.0")
   ],
   targets: [
     .target(

@@ -13,8 +13,8 @@ struct Recorded: Sendable {
   let headers: [String: String]
   let body: Data?
 
-  var path: String { url.path(percentEncoded: true) }
-  var query: String? { url.query(percentEncoded: true) }
+  var path: String { URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? "" }
+  var query: String? { URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery }
   func header(_ name: String) -> String? {
     headers.first { $0.key.lowercased() == name.lowercased() }?.value
   }
