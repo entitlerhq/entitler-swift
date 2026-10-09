@@ -619,6 +619,8 @@ final class RecordingStore: CacheStore {
 }
 
 func makeJWT(_ claims: [String: Any]) -> String {
+  var claims = claims
+  if claims["exp"] == nil { claims["exp"] = 4_000_000_000 }
   let header = Base64URL.encode(Data(#"{"alg":"none"}"#.utf8))
   let payload = Base64URL.encode(try! JSONSerialization.data(withJSONObject: claims))
   return "\(header).\(payload).sig"

@@ -21,7 +21,8 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
   /// - Throws: ``ArgumentError`` when the key is blank or `asOf` is not a valid date.
   public init(key: String, options: EntitlerOptions = EntitlerOptions()) throws {
     core = try Core(
-      options: options, credential: .server(key: require(key, Messages.key)), visitor: nil)
+      options: options, credential: .server(key: requireCredential(key, Messages.key)), visitor: nil
+    )
   }
 
   /// The base URL and the kind of client, never the key.
@@ -87,9 +88,8 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
         idempotencyKey: try validIdempotencyKey(event.idempotencyKey)
           ?? UUID().uuidString.lowercased())
     }
-    let requests = (prepared.count + 499) / 500
     let batchKey = try validIdempotencyKey(
-      idempotencyKey, maxLength: 199 - String(max(0, requests - 1)).count)
+      idempotencyKey, maxLength: 190, message: Messages.batchKey)
     var results: [UsageEventResult] = []
     for (index, start) in stride(from: 0, to: prepared.count, by: 500).enumerated() {
       let chunk = Array(prepared[start..<min(start + 500, prepared.count)])
@@ -339,7 +339,7 @@ extension EntitlerClient where Credential == TokenCredential {
   )
     throws
   {
-    let token = try require(token, Messages.customerToken)
+    let token = try requireCredential(token, Messages.customerToken)
     try self.init(credential: .token(TokenSource(fixed: token)), visitor: visitor, options: options)
   }
 
@@ -368,8 +368,8 @@ extension EntitlerClient where Credential == IdentityCredential {
     key: String, identityToken: String, visitor: String? = nil,
     options: EntitlerOptions = EntitlerOptions()
   ) throws {
-    let key = try require(key, Messages.key)
-    let token = try require(identityToken, Messages.identityToken)
+    let key = try requireCredential(key, Messages.key)
+    let token = try requireCredential(identityToken, Messages.identityToken)
     try self.init(
       credential: .identity(key: key, TokenSource(fixed: token)), visitor: visitor, options: options
     )
@@ -380,7 +380,7 @@ extension EntitlerClient where Credential == IdentityCredential {
     key: String, identityTokenProvider: @escaping TokenProvider, visitor: String? = nil,
     options: EntitlerOptions = EntitlerOptions()
   ) throws {
-    let key = try require(key, Messages.key)
+    let key = try requireCredential(key, Messages.key)
     try self.init(
       credential: .identity(
         key: key, TokenSource(provider: identityTokenProvider, blankMessage: Messages.identityToken)

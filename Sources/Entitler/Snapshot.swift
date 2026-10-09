@@ -104,12 +104,6 @@ public struct VerifiedSnapshot: Hashable, Sendable {
   public let entitlements: Entitlements
 }
 
-private struct SnapshotHeader: Decodable {
-  let typ: String
-  let alg: String
-  let kid: String
-}
-
 private struct SnapshotClaims: Decodable {
   let iss: String
   let sub: String
@@ -136,6 +130,9 @@ private struct SnapshotClaims: Decodable {
 public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectation) throws
   -> VerifiedSnapshot
 {
+  guard !expected.customer.trimmed.isEmpty, !expected.environment.trimmed.isEmpty else {
+    throw ArgumentError(message: Messages.expectation)
+  }
   guard (0...300).contains(expected.clockSkewSeconds) else {
     throw ArgumentError(message: "Pass clockSkewSeconds as a whole number from 0 to 300.")
   }
@@ -148,13 +145,13 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
   guard segments.count == 3,
     let headerData = Base64URL.decode(segments[0]),
     let signature = Base64URL.decode(segments[2]),
-    let header = try? JSON.decoder().decode(SnapshotHeader.self, from: headerData),
-    header.typ == "entitlements+jwt", header.alg == "ES256",
-    let fields = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
-    fields["crit"] == nil
+    let header = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any],
+    header["typ"] as? String == "entitlements+jwt", header["alg"] as? String == "ES256",
+    header.keys.contains("crit") == false
   else { throw malformed }
 
-  guard let key = expected.keys.first(where: { $0.kid == header.kid }) else {
+  guard let kid = header["kid"] as? String, let key = expected.keys.first(where: { $0.kid == kid })
+  else {
     throw fail(
       .invalid,
       "None of the keys passed signed this snapshot. Fetch them again with snapshotKeys().")

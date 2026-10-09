@@ -14,8 +14,17 @@ enum JWT {
     return (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any]
   }
 
-  static func number(_ value: Any?) -> TimeInterval? {
-    (value as? NSNumber)?.doubleValue
+  static func lifetime(_ token: String) -> (iat: Int64?, exp: Int64)? {
+    struct Lifetime: Decodable {
+      let iat: Int64?
+      let exp: Int64
+    }
+    let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+    guard segments.count == 3, let payload = Base64URL.decode(segments[1]),
+      let lifetime = try? JSONDecoder().decode(Lifetime.self, from: payload),
+      lifetime.iat.map({ $0 < lifetime.exp }) ?? true
+    else { return nil }
+    return (lifetime.iat, lifetime.exp)
   }
 }
 
@@ -104,10 +113,12 @@ actor TokenSource {
       guard !token.isEmpty else {
         throw EntitlerError.token(TokenError(message: blankMessage, underlyingError: nil))
       }
-      guard JWT.claims(token) != nil else {
+      guard JWT.lifetime(token) != nil else {
         throw EntitlerError.token(
           TokenError(
-            message: "The token provider answered a token that is not a JWT.", underlyingError: nil)
+            message:
+              "The token provider answered a token that is not a readable JWT with an expiry.",
+            underlyingError: nil)
         )
       }
       return token
@@ -115,8 +126,9 @@ actor TokenSource {
   }
 
   static func refreshTime(of token: String, receivedAt: Date) -> Date? {
-    guard let claims = JWT.claims(token), let exp = JWT.number(claims["exp"]) else { return nil }
-    let start = JWT.number(claims["iat"]) ?? receivedAt.timeIntervalSince1970
+    guard let lifetime = JWT.lifetime(token) else { return nil }
+    let exp = TimeInterval(lifetime.exp)
+    let start = lifetime.iat.map(TimeInterval.init) ?? receivedAt.timeIntervalSince1970
     let margin = min(60, max(0, exp - start) / 2)
     return Date(timeIntervalSince1970: exp - margin)
   }

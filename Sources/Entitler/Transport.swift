@@ -283,22 +283,21 @@ final class Core: Sendable, CustomReflectable {
       secret = key + "\n" + (token ?? "")
     }
     let parts: [String?] = [
-      "entitler-cache-v1", request.method, url(for: request).absoluteString, kind, sha256(secret),
+      "entitler-cache-v1", request.method.uppercased(), urlString(for: request), kind,
+      sha256(secret),
       options.asOf.map(formatInstant), request.visitor ?? visitor,
     ]
     return sha256("[" + parts.map { $0.map(jsonString) ?? "null" }.joined(separator: ",") + "]")
   }
 
-  func url(for request: Request) -> URL {
-    var text = options.base + request.path
-    if !request.query.isEmpty {
-      text +=
-        "?"
-        + request.query.map { "\($0.name.componentEncoded)=\($0.value.componentEncoded)" }
-        .joined(separator: "&")
-    }
-    return URL(string: text)!
+  func urlString(for request: Request) -> String {
+    guard !request.query.isEmpty else { return options.base + request.path }
+    return options.base + request.path + "?"
+      + request.query.map { "\($0.name.componentEncoded)=\($0.value.componentEncoded)" }
+      .joined(separator: "&")
   }
+
+  func url(for request: Request) -> URL { URL(string: urlString(for: request))! }
 
   func send(_ request: Request, token: String? = nil, ifNoneMatch etag: String? = nil) async throws
     -> Response
@@ -444,29 +443,37 @@ final class Core: Sendable, CustomReflectable {
   private func apiError(_ http: HTTPURLResponse, body: Data, idempotencyKey: String?, now: Date)
     -> APIError
   {
-    struct Body: Decodable {
-      struct Detail: Decodable {
-        let code: ErrorCode?
-        let message: String?
-        let payment: Payment?
-        let listingGaps: [ListingGap]?
-        let listingProblems: [ListingProblem]?
-      }
-      let error: Detail?
+    let status = http.statusCode
+    let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+    let detail = (300..<400).contains(status) ? nil : object?["error"] as? [String: Any]
+    func text(_ key: String) -> String? {
+      (detail?[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
     }
-    let detail = (try? JSON.decoder().decode(Body.self, from: body))?.error
+    func items<Item: Decodable>(_ key: String) -> [Item] {
+      guard let array = detail?[key] as? [Any],
+        let data = try? JSONSerialization.data(withJSONObject: array)
+      else { return [] }
+      return (try? JSON.decoder().decode([Item].self, from: data)) ?? []
+    }
+    var payment: Payment?
+    if status == 402, let object = detail?["payment"] as? [String: Any],
+      let raw = object["status"] as? String, case let paymentStatus = PaymentStatus(rawValue: raw),
+      [.declined, .requiresAction, .processing, .pending].contains(paymentStatus)
+    {
+      payment = Payment(status: paymentStatus, url: object["url"] as? String)
+    }
     return APIError(
-      status: http.statusCode,
-      code: detail?.code ?? .httpError,
-      message: detail?.message ?? "Entitler answered with HTTP \(http.statusCode).",
+      status: status,
+      code: text("code").map(ErrorCode.init(rawValue:)) ?? .httpError,
+      message: text("message") ?? "Entitler answered with HTTP \(status).",
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
         retryAfter($0, now: now)
       },
       idempotencyKey: idempotencyKey,
-      payment: detail?.payment,
-      listingGaps: detail?.listingGaps ?? [],
-      listingProblems: detail?.listingProblems ?? [])
+      payment: payment,
+      listingGaps: items("listingGaps"),
+      listingProblems: items("listingProblems"))
   }
 }
 
@@ -493,13 +500,22 @@ func jsonString(_ text: String) -> String {
 }
 
 func retryAfter(_ value: String, now: Date) -> TimeInterval? {
-  let value = value.trimmed
-  if let seconds = TimeInterval(value), seconds >= 0 { return seconds }
+  let value = value.trimmingCharacters(in: .whitespaces)
+  if !value.isEmpty, value.utf8.allSatisfy({ (0x30...0x39).contains($0) }) {
+    return TimeInterval(value) ?? .greatestFiniteMagnitude
+  }
   let formatter = DateFormatter()
   formatter.locale = Locale(identifier: "en_US_POSIX")
   formatter.timeZone = TimeZone(identifier: "GMT")
-  formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-  return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now)) }
+  for format in [
+    "EEE, dd MMM yyyy HH:mm:ss 'GMT'", "EEEE, dd-MMM-yy HH:mm:ss 'GMT'", "EEE MMM d HH:mm:ss yyyy",
+  ] {
+    formatter.dateFormat = format
+    if let date = formatter.date(from: value.replacingOccurrences(of: "  ", with: " ")) {
+      return max(0, date.timeIntervalSince(now))
+    }
+  }
+  return nil
 }
 
 extension Response {

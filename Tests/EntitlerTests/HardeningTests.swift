@@ -501,3 +501,152 @@ import Testing
     #expect(refused.results.first?.error?.code == .scopeRequired)
   }
 }
+
+@Suite struct PrecisionTests {
+  @Test func idsAreSentAsGivenAndCredentialsTrimmed() async throws {
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let server = try EntitlerServer(key: "  sk_padded  ", options: api.options())
+    _ = try await api.run { try await server.customer(" user ").check("sso") }
+    #expect(api.last.path == "/customers/%20user%20/entitlements/sso")
+    #expect(api.last.header("Authorization") == "Bearer sk_padded")
+    #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer.")) {
+      try server.customer("   ")
+    }
+  }
+
+  @Test func theBatchKeyLeavesRoomForTheRequestIndex() async throws {
+    let api = FakeAPI()
+    let one = [UsageBatchEvent(customer: "c", feature: Feature<Metered>("ai_credits"))]
+    await #expect(
+      throws: ArgumentError(message: "Pass idempotencyKey as 1 to 190 printable ASCII characters.")
+    ) {
+      try await api.server().recordUsageBatch(
+        one, idempotencyKey: String(repeating: "k", count: 191))
+    }
+    #expect(api.count == 0)
+  }
+
+  @Test func retryAfterReadsDigitsAndTheThreeDateForms() {
+    let now = Date(timeIntervalSince1970: 784_111_777)
+    #expect(retryAfter("120", now: now) == 120)
+    #expect(retryAfter("1.5", now: now) == nil)
+    #expect(retryAfter("-3", now: now) == nil)
+    #expect(retryAfter("soon", now: now) == nil)
+    #expect(retryAfter("Sun, 06 Nov 1994 08:49:40 GMT", now: now) == 3)
+    #expect(retryAfter("Sunday, 06-Nov-94 08:49:40 GMT", now: now) == 3)
+    #expect(retryAfter("Sun Nov  6 08:49:40 1994", now: now) == 3)
+    #expect(retryAfter("Sun, 06 Nov 1994 08:00:00 GMT", now: now) == 0)
+  }
+
+  @Test(arguments: [
+    #"{"sub":"u"}"#, #"{"exp":"soon"}"#, #"{"exp":1.5}"#, #"{"exp":100,"iat":"x"}"#,
+    #"{"exp":100,"iat":100}"#, #"[1]"#,
+  ])
+  func unreadableProviderTokensAreTokenErrors(payload: String) async throws {
+    let token = "e30." + Base64URL.encode(Data(payload.utf8)) + ".sig"
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let client = try EntitlerClient(tokenProvider: { token }, options: api.options())
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await client.me.check("sso") }
+    }
+    #expect(api.count == 0)
+  }
+
+  @Test func errorBodiesCountOnlyWellFormedFields() async throws {
+    let api = FakeAPI { _ in
+      .json(
+        #"{"error":{"code":"","message":5,"payment":{"status":"declined","url":7},"listingGaps":"no"}}"#,
+        status: 402)
+    }
+    do {
+      _ = try await api.run { try await api.server().customer("u").billing() }
+    } catch EntitlerError.api(let error) {
+      #expect(error.code == .httpError)
+      #expect(error.message == "Entitler answered with HTTP 402.")
+      #expect(error.payment?.status == .declined)
+      #expect(error.payment?.url == nil)
+      #expect(error.listingGaps.isEmpty)
+    }
+    api.answer { _ in
+      .json(#"{"error":{"code":"x","message":"y","payment":{"status":"declined"}}}"#, status: 409)
+    }
+    do {
+      _ = try await api.run { try await api.server().customer("u").billing() }
+    } catch EntitlerError.api(let error) {
+      #expect(error.payment == nil)
+      #expect(error.code.rawValue == "x")
+    }
+    api.answer { _ in .json(#"{"error":{"code":"moved","message":"Elsewhere."}}"#, status: 302) }
+    do {
+      _ = try await api.run { try await api.server().customer("u").billing() }
+    } catch EntitlerError.api(let error) {
+      #expect(error.code == .httpError)
+      #expect(error.message == "Entitler answered with HTTP 302.")
+    }
+  }
+
+  @Test func instantsOutsideYearsOneToNineThousandNineHundredNinetyNineDoNotDecode() {
+    #expect(parseInstant("0001-01-01T00:00:00Z") != nil)
+    #expect(parseInstant("9999-12-31T23:59:59Z") != nil)
+    #expect(parseInstant("10000-01-01T00:00:00Z") == nil)
+  }
+}
+
+@Suite struct SnapshotPrecisionTests {
+  let signer = Signer()
+
+  func message(_ token: String, customer: String = "user_1", environment: String = "env_1")
+    -> String?
+  {
+    do {
+      _ = try verifySnapshot(
+        token,
+        expecting: SnapshotExpectation(
+          keys: [signer.jwk], customer: customer, environment: environment,
+          now: SnapshotTests.now))
+      return nil
+    } catch let error as ArgumentError {
+      return error.message
+    } catch EntitlerError.snapshot(let error) {
+      return error.message
+    } catch {
+      return "\(error)"
+    }
+  }
+
+  @Test func blankExpectationsAreArgumentErrors() {
+    let token = signer.sign(claims: SnapshotTests.claims())
+    #expect(
+      message(token, customer: " ")
+        == "Provide the customer and environment the snapshot must be for.")
+    #expect(
+      message(token, environment: "")
+        == "Provide the customer and environment the snapshot must be for.")
+  }
+
+  @Test func aMissingKidIsTheUnknownKeyError() {
+    let token = signer.sign(
+      header: ["typ": "entitlements+jwt", "alg": "ES256"], claims: SnapshotTests.claims())
+    #expect(
+      message(token)
+        == "None of the keys passed signed this snapshot. Fetch them again with snapshotKeys().")
+  }
+
+  @Test func critInAnyFormAndPaddingAreRefused() {
+    let malformed = "That is not an entitlements snapshot. Pass the token snapshot() returned."
+    let withCrit = signer.sign(
+      header: ["typ": "entitlements+jwt", "alg": "ES256", "kid": "key_1", "crit": NSNull()],
+      claims: SnapshotTests.claims())
+    #expect(message(withCrit) == malformed)
+    let token = signer.sign(claims: SnapshotTests.claims())
+    #expect(message(token + "=") == malformed)
+    #expect(message("+" + token.dropFirst()) == malformed)
+    #expect(message("") == malformed)
+  }
+
+  @Test func instantsBeyondYearNineThousandNineHundredNinetyNineAreMalformed() {
+    let token = signer.sign(claims: SnapshotTests.claims { $0["exp"] = 253_402_300_800 })
+    #expect(
+      message(token) == "That is not an entitlements snapshot. Pass the token snapshot() returned.")
+  }
+}

@@ -100,12 +100,20 @@ enum JSON {
 }
 
 func parseInstant(_ text: String) -> Date? {
-  (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text))
+  let year = text.prefix(5)
+  guard year.count == 5, year.last == "-", year.dropLast().allSatisfy(\.isASCIIDigit),
+    year.dropLast() != "0000"
+  else { return nil }
+  return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text))
     ?? (try? Date.ISO8601FormatStyle().parse(text))
 }
 
 func formatInstant(_ date: Date) -> String {
   Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(date)
+}
+
+extension Character {
+  var isASCIIDigit: Bool { isASCII && isNumber }
 }
 
 extension String {
@@ -121,10 +129,12 @@ extension String {
 }
 
 enum Base64URL {
+  static let alphabet = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
   static func decode(_ text: some StringProtocol) -> Data? {
+    guard text.allSatisfy(alphabet.contains) else { return nil }
     var base64 = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(
       of: "_", with: "/")
-    guard !base64.contains("=") else { return nil }
     base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
     return Data(base64Encoded: base64)
   }
@@ -145,9 +155,12 @@ func validAmount(_ amount: Int64) throws -> Int64 {
 }
 
 func require(_ value: String, _ message: String) throws -> String {
-  let trimmed = value.trimmed
-  guard !trimmed.isEmpty else { throw ArgumentError(message: message) }
-  return trimmed
+  guard !value.trimmed.isEmpty else { throw ArgumentError(message: message) }
+  return value
+}
+
+func requireCredential(_ value: String, _ message: String) throws -> String {
+  try require(value, message).trimmed
 }
 
 enum Messages {
@@ -164,6 +177,8 @@ enum Messages {
   static let asOf = "Pass asOf as a valid date."
   static let idempotencyKey = "Pass idempotencyKey as 1 to 200 printable ASCII characters."
   static let holdKey = "Pass idempotencyKey as 1 to 193 printable ASCII characters."
+  static let batchKey = "Pass idempotencyKey as 1 to 190 printable ASCII characters."
+  static let expectation = "Provide the customer and environment the snapshot must be for."
   static let dots = "Pass an id that is not made only of dots."
   static let amount = "Pass amount as a whole number from 1 to 9007199254740991."
   static let settledAmount = "Pass amount as a whole number from 0 to the held amount."
