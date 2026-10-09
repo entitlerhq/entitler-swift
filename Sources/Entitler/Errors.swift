@@ -25,7 +25,7 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   case token(TokenError)
   /// An offline snapshot failed verification.
   case snapshot(SnapshotError)
-  /// ``Customer/withHold(of:amount:ttlSeconds:idempotencyKey:timeout:_:)`` was refused its hold.
+  /// `withHold(of:amount:)` was refused its hold.
   case usageRefused(UsageResult)
 
   /// The message of the error this case carries.

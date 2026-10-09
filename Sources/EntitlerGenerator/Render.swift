@@ -59,7 +59,7 @@ public func existingFeatureNames(in source: String) -> [String: String] {
 /// Renders the Swift source of typed feature constants, as `entitler generate` writes it.
 ///
 /// - Parameters:
-///   - list: The features, from ``EntitlerServer/features(timeout:)``.
+///   - list: The features, from `EntitlerServer.features()`.
 ///   - accessLevel: The access level of `Features` and its constants.
 ///   - existingSource: The file being replaced, whose names are kept for the keys it holds.
 public func renderFeatures(

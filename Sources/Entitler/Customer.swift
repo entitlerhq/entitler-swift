@@ -130,8 +130,10 @@ extension Customer {
 
   /// The plans on sale to the customer, through their track, through the cache.
   ///
-  /// - Parameter visitor: On the server, the visitor id the customer had while signed out, so
-  ///   they keep their experiment arm. An in-app client sends its own.
+  /// - Parameters:
+  ///   - visitor: On the server, the visitor id the customer had while signed out, so they
+  ///     keep their experiment arm. An in-app client sends its own.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing
   {
     try await handle.read(["pricing"], visitor: visitor, timeout: timeout)
@@ -164,12 +166,15 @@ extension Customer {
   /// ```
   ///
   /// - Parameters:
+  ///   - feature: The metered feature.
+  ///   - amount: A whole number in the feature's unit, from 1 to 2^53 − 1.
   ///   - mode: ``UsageMode/gate`` (the API's default) records only within the allowance;
   ///     ``UsageMode/observe`` always records.
   ///   - occurredAt: When the usage happened, so it counts in that period.
   ///   - register: Registers a customer not registered yet, if the credential may.
   ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
   ///     recognised. The SDK generates one otherwise.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func recordUsage(
     of feature: Feature<Metered>, amount: Int64, mode: UsageMode? = nil, occurredAt: Date? = nil,
@@ -196,7 +201,13 @@ extension Customer {
 
   /// Holds an amount against the allowance until it is settled, released or expires.
   ///
-  /// - Parameter ttlSeconds: How long the hold lasts, 1 to 3600 (the API's default is 300).
+  /// - Parameters:
+  ///   - feature: The metered feature.
+  ///   - amount: How much to hold.
+  ///   - ttlSeconds: How long the hold lasts, 1 to 3600 (the API's default is 300).
+  ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
+  ///     recognised. The SDK generates one otherwise.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func holdUsage(
     of feature: Feature<Metered>, amount: Int64, ttlSeconds: Int? = nil,
     idempotencyKey: String? = nil, timeout: TimeInterval? = nil
@@ -312,7 +323,9 @@ extension Customer {
   /// Meters in a snapshot are frozen when it is signed. Verify it with
   /// ``verifySnapshot(_:expecting:)``.
   ///
-  /// - Parameter ttlSeconds: How long it lasts, at most the project's offline days.
+  /// - Parameters:
+  ///   - ttlSeconds: How long it lasts, at most the project's offline days.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func snapshot(ttlSeconds: Int? = nil, timeout: TimeInterval? = nil) async throws
     -> IssuedSnapshot
   {

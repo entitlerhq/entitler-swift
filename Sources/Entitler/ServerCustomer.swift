@@ -59,8 +59,15 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// Call it at sign-up and at sign-in with the latest details. Changing an existing customer's
   /// details needs `customers:write` or `customers:profile`.
   ///
-  /// - Parameter visitor: The visitor id the person had while signed out, so they keep their
-  ///   experiment arm.
+  /// - Parameters:
+  ///   - name: The customer's name.
+  ///   - email: The customer's email address.
+  ///   - metadata: Your metadata, merged into what Entitler holds.
+  ///   - visitor: The visitor id the person had while signed out, so they keep their
+  ///     experiment arm.
+  ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
+  ///     recognised. The SDK generates one otherwise.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func register(
     name: String? = nil, email: String? = nil, metadata: [String: String]? = nil,
@@ -81,7 +88,9 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// The customer in full, with a page of their usage log.
   ///
-  /// - Parameter cursor: The ``Page/next`` of the usage log, for the page after it.
+  /// - Parameters:
+  ///   - cursor: The ``Page/next`` of the usage log, for the page after it.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func details(cursor: String? = nil, timeout: TimeInterval? = nil) async throws
     -> CustomerDetail
   {
@@ -123,6 +132,7 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// - Parameters:
   ///   - scopes: The scopes to hold, from `entitlements:read`, `usage:read` and `usage:write`.
   ///   - ttlSeconds: How long it lasts, 60 to 3600 (the API's default is an hour).
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func token(scopes: [Scope]? = nil, ttlSeconds: Int? = nil, timeout: TimeInterval? = nil)
     async throws -> IssuedCustomerToken
   {
@@ -185,7 +195,12 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
 
   /// Cancels the customer's plan, at the end of the period unless `when` is ``ChangeTiming/now``.
   ///
-  /// - Parameter product: The product's key, needed only when they hold plans in several.
+  /// - Parameters:
+  ///   - when: ``ChangeTiming/now`` to cancel at once.
+  ///   - product: The product's key, needed only when they hold plans in several.
+  ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
+  ///     recognised. The SDK generates one otherwise.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func cancel(
     when: ChangeTiming? = nil, product: String? = nil, idempotencyKey: String? = nil,
@@ -353,8 +368,13 @@ public struct Vendor: Sendable {
   /// ```
   ///
   /// - Parameters:
+  ///   - feature: The feature to grant.
   ///   - value: An amount or ``FeatureValue/unlimited``; leave it out for an on/off feature.
   ///   - days: How many days it lasts; leave it out for no end.
+  ///   - reason: Why it was given, kept in the customer's history.
+  ///   - idempotencyKey: A key from your own unit of work, so a retry from anywhere is
+  ///     recognised. The SDK generates one otherwise.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func grant<Kind>(
     _ feature: Feature<Kind>, value: FeatureValue? = nil, days: Int? = nil, reason: String? = nil,

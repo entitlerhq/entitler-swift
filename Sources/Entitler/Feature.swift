@@ -2,7 +2,7 @@ import Foundation
 
 /// The type of a feature, carried by a ``Feature`` constant so each answer is typed to match.
 public protocol FeatureKind: Sendable {
-  /// The answer ``Customer/check(_:timeout:)`` gives for features of this kind.
+  /// The answer `check(_:timeout:)` gives for features of this kind.
   associatedtype Check: Decodable & Sendable
   /// The feature type the API names for this kind.
   static var type: FeatureType { get }

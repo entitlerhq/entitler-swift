@@ -93,8 +93,10 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
 
   /// The plans on sale to a signed-out visitor, for a pricing page, through the cache.
   ///
-  /// - Parameter visitor: The visitor's id from ``newVisitorID()``, kept in a first-party cookie,
-  ///   so they see the same experiment arm on every page.
+  /// - Parameters:
+  ///   - visitor: The visitor's id from ``newVisitorID()``, kept in a first-party cookie, so
+  ///     they see the same experiment arm on every page.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func pricing(visitor: String? = nil, timeout: TimeInterval? = nil) async throws -> Pricing
   {
     var request = try Request("GET", ["pricing"])
@@ -184,6 +186,7 @@ public struct Customers: Sendable {
   ///   - cohort: Only the customers holding a cohort, as `<plan key or id>:<n>`.
   ///   - track: Only one track's members, by its id.
   ///   - includeTest: In a live environment, also the test customers.
+  ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func list(
     query: String? = nil, cohort: String? = nil, track: String? = nil, includeTest: Bool = false,
     timeout: TimeInterval? = nil
@@ -300,6 +303,7 @@ extension EntitlerClient where Credential == TokenCredential {
   /// - Parameters:
   ///   - token: A customer token your server minted with ``ServerCustomer/token(scopes:ttlSeconds:timeout:)``.
   ///   - visitor: A visitor id to use instead of the one the client keeps.
+  ///   - options: Timeouts, retries, the cache and the rest.
   public convenience init(
     token: String, visitor: String? = nil, options: EntitlerOptions = EntitlerOptions()
   )
@@ -328,6 +332,8 @@ extension EntitlerClient where Credential == IdentityCredential {
   /// - Parameters:
   ///   - key: A publishable project key holding only product scopes. Never a secret key.
   ///   - identityToken: An identity token from a sign-in provider registered on the project.
+  ///   - visitor: A visitor id to use instead of the one the client keeps.
+  ///   - options: Timeouts, retries, the cache and the rest.
   public convenience init(
     key: String, identityToken: String, visitor: String? = nil,
     options: EntitlerOptions = EntitlerOptions()

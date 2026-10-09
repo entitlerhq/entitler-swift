@@ -88,7 +88,7 @@ public struct Upgrade: Codable, Hashable, Sendable {
 
 /// Whether a customer is entitled to one feature, with its value and sources.
 ///
-/// ``Customer/check(_:timeout:)`` answers a ``MeteredCheck`` for metered features instead.
+/// `check(_:timeout:)` answers a ``MeteredCheck`` for metered features instead.
 public struct Check: Codable, Hashable, Sendable, StaleMarking {
   /// The customer's external id.
   public let customer: String
