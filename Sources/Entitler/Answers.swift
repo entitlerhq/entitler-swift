@@ -466,7 +466,9 @@ public struct PublishedProduct: Codable, Hashable, Sendable {
 
 /// A billing period a plan is sold for.
 public struct BillingPeriod: Codable, Hashable, Sendable {
-  /// The period's label, such as `monthly`.
+  /// The period's key, such as `monthly`, which writes take.
+  public let key: String
+  /// The period's label to show, such as Monthly.
   public let label: String
   /// How many units it lasts.
   public let count: Int64

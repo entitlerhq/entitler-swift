@@ -97,7 +97,8 @@ public enum FakeAnswers {
         "id": "plan_\(key)", "key": key, "name": key.capitalized, "description": "",
         "kind": "plan", "product": "app", "salesLed": false, "status": "active", "version": 1,
         "default": key == "free",
-        "periods": [["label": "Monthly", "count": 1, "unit": "months"]], "attachesTo": [Any](),
+        "periods": [["key": "monthly", "label": "Monthly", "count": 1, "unit": "months"]],
+        "attachesTo": [Any](),
         "features": [String: Any](), "listings": [Any](),
       ]
     }

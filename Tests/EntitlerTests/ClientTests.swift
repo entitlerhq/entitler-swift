@@ -195,7 +195,7 @@ import Testing
         )
       default:
         .json(
-          #"{\#(Fixture.context),"customer":null,"defaultPlan":"free","products":[{"key":"app","name":"App","defaultPlan":"free"}],"plans":[{"id":"p","key":"pro","name":"Pro","description":"","kind":"plan","product":"app","salesLed":false,"status":"active","version":1,"default":false,"periods":[{"label":"monthly","count":1,"unit":"months"}],"attachesTo":[],"features":{"sso":true,"seats":5,"credits":"unlimited"},"listings":[{"period":{"key":"monthly","label":"Monthly"},"channels":[{"channel":{"provider":"stripe","connectionId":"c1"},"name":"Stripe","mode":"test","purchasable":true,"ids":{"price":"price_1"},"price":{"amount":1000,"currency":"aud","interval":"month","intervalCount":1,"tax":"exclusive"}}]}]}]}"#
+          #"{\#(Fixture.context),"customer":null,"defaultPlan":"free","products":[{"key":"app","name":"App","defaultPlan":"free"}],"plans":[{"id":"p","key":"pro","name":"Pro","description":"","kind":"plan","product":"app","salesLed":false,"status":"active","version":1,"default":false,"periods":[{"key":"monthly","label":"Monthly","count":1,"unit":"months"}],"attachesTo":[],"features":{"sso":true,"seats":5,"credits":"unlimited"},"listings":[{"period":{"key":"monthly","label":"Monthly"},"channels":[{"channel":{"provider":"stripe","connectionId":"c1"},"name":"Stripe","mode":"test","purchasable":true,"ids":{"price":"price_1"},"price":{"amount":1000,"currency":"aud","interval":"month","intervalCount":1,"tax":"exclusive"}}]}]}]}"#
         )
       }
     }
@@ -219,6 +219,7 @@ import Testing
       #expect(plan.listings.first?.channels.first?.price?.interval == .month)
       #expect(plan.listings.first?.channels.first?.channel.connectionID == "c1")
       #expect(plan.listings.first?.period?.key == "monthly")
+      #expect(plan.periods.first?.key == "monthly")
       #expect(!plan.isDefault)
       #expect(pricing.customer == nil)
     }
