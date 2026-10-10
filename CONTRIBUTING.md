@@ -19,8 +19,8 @@ swift build
 | `swift test --skip EntitlerIntegrationTests --enable-code-coverage` | unit tests |
 | `swift test --sanitize=thread --skip EntitlerIntegrationTests` | unit tests under Thread Sanitizer |
 | `ENTITLER_TEST_KEY=sk_… swift test --filter EntitlerIntegrationTests` | live API tests |
-| `ENTITLER_DOCS=1 swift package generate-documentation --target Entitler --target EntitlerGenerator --warnings-as-errors` | API reference |
-| `python3 scripts/extract-snippets.py && (cd examples && swift build)` | examples and the snippets of the README and guides |
+| `ENTITLER_DOCS=1 swift package generate-documentation --target Entitler --target EntitlerTesting --target EntitlerGenerator --warnings-as-errors` | API reference |
+| `python3 scripts/extract-snippets.py && (cd examples && swift build --build-tests && swift test --skip-build)` | examples and the snippets of the README and guides |
 | `UPDATE_GOLDEN=1 swift test --filter GeneratorTests` | rewrite the generator's golden files |
 
 Coverage must stay at or above 90% of lines; CI enforces it.

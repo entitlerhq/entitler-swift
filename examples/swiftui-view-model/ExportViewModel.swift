@@ -14,8 +14,8 @@
 
     private let customer: SignedInCustomer
 
-    init(client: EntitlerClient<TokenCredential>) {
-      customer = client.me
+    init(customer: SignedInCustomer) {
+      self.customer = customer
     }
 
     func refresh() async {
@@ -23,9 +23,10 @@
       creditsLeft = try? await customer.check(Features.aiCredits).remaining
     }
 
-    func export() async throws {
+    func export(job: UUID) async throws {
       guard canExport else { return }
-      try await customer.recordUsage(of: Features.aiCredits, amount: 1)
+      try await customer.recordUsage(
+        of: Features.aiCredits, amount: 1, idempotencyKey: "export-\(job.uuidString)")
       await refresh()
     }
   }
@@ -35,7 +36,7 @@
 
     var body: some View {
       Button("Export to PDF") {
-        Task { try? await model.export() }
+        Task { try? await model.export(job: UUID()) }
       }
       .disabled(!model.canExport)
       .task { await model.refresh() }

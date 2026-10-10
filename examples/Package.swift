@@ -17,6 +17,13 @@ let package = Package(
     .executableTarget(
       name: "generated-features", dependencies: [entitler], path: "generated-features"),
     .target(name: "SwiftUIViewModel", dependencies: [entitler], path: "swiftui-view-model"),
-    .target(name: "DocSnippets", dependencies: [entitler], path: "doc-snippets"),
+    .testTarget(
+      name: "testing",
+      dependencies: [entitler, .product(name: "EntitlerTesting", package: "entitler-swift")],
+      path: "testing"),
+    .target(
+      name: "DocSnippets",
+      dependencies: [entitler, .product(name: "EntitlerTesting", package: "entitler-swift")],
+      path: "doc-snippets"),
   ]
 )

@@ -20,6 +20,7 @@ let key = "sk_test"
 let server = try! EntitlerServer(key: key)
 let customer = try! server.customer("user_123")
 let client = try! EntitlerClient(token: "token")
+let tokenClient = client
 let api = AppAPI()
 let signIn = SignIn()
 let service = try! EntitlerService()
@@ -33,6 +34,13 @@ let jobID = "1"
 let document = ""
 let name = "Ada"
 let email = "ada@example.com"
+let storedSnapshot = ""
+let returnURL = URL(string: "https://example.com/billing/return")!
+let stream = AsyncStream<Chunk> { $0.finish() }
+
+struct Chunk {
+  let tokensSoFar: Int64
+}
 
 struct AppAPI {
   func entitlerToken() async throws -> String { "" }
@@ -61,5 +69,11 @@ for path in [root / "README.md", *sorted((root / "docs").glob("*.md"))]:
         imports = "import Entitler\nimport Foundation\n"
         if ": View" in block or "ObservableObject" in block:
             body = f"#if canImport(SwiftUI)\nimport SwiftUI\n\n{body}#endif\n"
+        if "FakeCustomer" in block or "FakeAnswers" in block:
+            imports += "import EntitlerTesting\n"
+        if "StoredVisitor" in block or "storedVisitorID" in block:
+            body = f"#if canImport(Darwin)\n{body}#endif\n"
+        if "ASWebAuthenticationSession" in block:
+            body = f"#if canImport(AuthenticationServices)\nimport AuthenticationServices\n\n{body}#endif\n"
         (out / f"{name}.swift").write_text(imports + "\n" + body)
 print(f"Extracted {count} snippets.")

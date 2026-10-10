@@ -26,9 +26,11 @@ Checks, entitlement lists, customer plans and customer pricing, and on the serve
 
 - An answer whose age (time since receipt plus its `Age` header) is below its `max-age`, and
   that has no `no-cache`, answers without a request.
-- Every write to a customer, except minting tokens and snapshots and opening a checkout or the
-  billing portal, moves that customer's write generation. Answers kept before it, or read while it
-  moved, are revalidated.
+- Every write to a customer, except minting tokens and snapshots and opening the billing portal,
+  moves that customer's write generation. Answers kept before it, or read while it moved, are
+  revalidated.
+- `revalidate: true` skips a fresh answer and revalidates it, for a page that knows the customer
+  just changed.
 - Otherwise the SDK sends the kept `ETag` in `If-None-Match`; a `304` answers the kept body, and
   headers it sends replace the kept ones.
 - `no-store` answers are never kept.
@@ -38,10 +40,13 @@ an injected session's included, ignores the platform's cache.
 
 Keys are the SHA-256 of the request, the kind of credential, a SHA-256 of the credential itself,
 the as-of instant and the visitor; they never hold a credential, and a refreshed token keys its
-own answers. Entries are plain values (`CacheEntry`, format 1), private to this SDK. Share answers
-between processes, or keep them across launches, with your own store. A store that throws counts
-as a miss or skips the write, and the error goes to `onError`. `timeToLive` is `staleFor` plus the
-answer's `max-age`: stores that expire entries should expire them after that.
+own answers. Entries are plain values (`CacheEntry`, format 1), private to this SDK. A server shares
+answers between processes with a store of its own, such as Redis. A store that throws counts as a
+miss or skips the write, and the error goes to `onError`. `timeToLive` is `staleFor` plus the
+answer's `max-age`: stores that expire entries should expire them after that. Custom stores are for
+`EntitlerServer` only: an in-app client's principal changes with every token, so a store kept across
+launches would never answer it again. In apps, only [snapshots](offline-snapshots.md) survive a
+relaunch.
 
 ```swift
 actor DiskStore: CacheStore {
@@ -60,7 +65,8 @@ actor DiskStore: CacheStore {
 ```
 
 ```swift
-let cachedServer = try EntitlerServer(key: key, options: EntitlerOptions(cache: DiskStore()))
+let cachedServer = try EntitlerServer(key: key, cache: DiskStore())
+print(cachedServer)
 ```
 
 Pass `cache: nil` to turn caching off.
@@ -76,14 +82,18 @@ it with `stale` set to `true` and passes the error to `onError`:
 let options = EntitlerOptions(onError: { error in
   print("Entitler fallback:", error)
 })
+print(options.staleFor)
 ```
 
 For the next 30 seconds (or the failed answer's `Retry-After`, if longer), reads with a kept answer
 answer it at once, still `stale`, without a request; then one request tests the API again. So an
 outage costs one slow read, not one per call.
 
-Stale answers never cross credentials, with one exception: when the in-app client's token provider
-fails (offline, typically), reads may answer entries kept under the token the client held before.
+Stale answers never cross credentials: an answer kept under another credential, a token the same
+client held before included, is never answered. So when the in-app client's token provider fails
+(offline, typically), the read fails with its `TokenError` and `isEntitled` answers its default.
+Apps that must work offline, or after a relaunch, verify a [snapshot](offline-snapshots.md), and
+fall back to it when `error.isUnreachable` is true.
 
 `onError` never changes a call's answer or its error. Every other failure throws as usual.
 `isEntitled` goes further and never fails; see [checking access](checking-access.md).

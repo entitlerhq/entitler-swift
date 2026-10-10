@@ -21,9 +21,10 @@ Each call asks again, so a newly granted scope shows without a restart. For an i
 | `entitlements:read` | check features, list entitlements, read customer plans and pricing, mint snapshots |
 | `usage:read` | read usage and holds |
 | `usage:write` | record usage, hold, settle and release |
+| `billing:self` | subscribe, cancel, undo, open the billing portal and sync billing for the customer the credential names |
 | `customers:register` | register customers |
-| `customers:read` | list and read customers, billing and providers |
-| `customers:write` | create, change and delete customers, billing, vendor actions |
+| `customers:read` | list and read customers and their billing |
+| `customers:write` | create, change and erase customers, billing and company decisions |
 | `customers:profile` | change customers' names, emails and metadata |
 | `customers:sample` | replace the sample customers |
 | `tokens:mint` | mint customer tokens |
@@ -37,5 +38,7 @@ Each call asks again, so a newly granted scope shows without a restart. For an i
 | `projects:manage` | manage projects |
 | `org:manage` | manage the organisation |
 
-Customer tokens hold at most `entitlements:read`, `usage:read` and `usage:write`. Identity tokens
-hold at most those and `customers:register`.
+Customer tokens hold at most `entitlements:read`, `usage:read`, `usage:write` and `billing:self`,
+and `token()` without `scopes` mints `entitlements:read` only. Identity tokens hold at most those
+and `customers:register`. Publishable keys hold product scopes only. No key holds `billing:self`:
+it names the customer a token acts for, so mint it only for people who may buy for that customer.

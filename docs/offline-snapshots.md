@@ -24,12 +24,13 @@ Meters in a snapshot are frozen when it is signed: `used` and `remaining` do not
 
 ## Key pinning
 
-The keys decide which snapshots an app trusts. Ship them with the app, fetched with
-`snapshotKeys()` at build time:
+The keys decide which snapshots an app trusts. Ship them with the app, written at build time by
+`swift run entitler snapshot-keys --out Sources/App/SnapshotKeys.json` (see
+[the command-line tool](generator.md)), and load them from the bundle:
 
 ```swift
-let keys = try await server.snapshotKeys()
-let json = try JSONEncoder().encode(keys)
+let url = Bundle.main.url(forResource: "SnapshotKeys", withExtension: "json")
+let shipped = try url.map { try JSONDecoder().decode(SnapshotKeys.self, from: Data(contentsOf: $0)) }
 ```
 
 Replace them only with keys fetched from Entitler over HTTPS. Never store them beside the token or
@@ -49,3 +50,20 @@ trusted storage, and verify offline against the keys you hold. A snapshot signed
 has not fetched yet fails with `None of the keys passed signed this snapshot.` until the app is
 next online. Verification itself never makes a request. `snapshotKeys()` sends no credential, so
 it works even while no token can be had.
+
+## Falling back offline
+
+Snapshots are the only answers an in-app client keeps across a relaunch: its cache lives in
+memory. Fall back to one when Entitler cannot be reached:
+
+```swift
+do {
+  let check = try await client.me.check(Features.exportPDF)
+  print(check.entitled)
+} catch let error as EntitlerError where error.isUnreachable {
+  let snapshot = try verifySnapshot(
+    storedSnapshot,
+    expecting: SnapshotExpectation(keys: bundledKeys, customer: customerID, environment: environmentID))
+  print(snapshot.entitlements.has(Features.exportPDF))
+}
+```

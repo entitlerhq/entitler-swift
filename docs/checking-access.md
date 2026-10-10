@@ -38,7 +38,20 @@ A metered constant answers a `MeteredCheck`, whose `used`, `held` and `remaining
 every other constant answers a `Check`. A plain key answers a `Check`:
 `try await customer.check("export_pdf")`.
 
-`value` is a `FeatureValue`: `.on`, `.amount(n)` or `.unlimited`.
+`value` is a `FeatureValue`: `.on`, `.amount(n)` or `.unlimited`. A metered feature's `entitled`
+means allowance remains: the customer has the feature and `remaining` is above 0. `upgrades` lists
+the plans that would entitle the customer, filled only when they are not, each with the `move` and
+`action` a paywall uses ([billing pages](billing.md)).
+
+## Revalidating after a change
+
+A kept answer stands until its `max-age` passes. When your app knows the customer just changed (back
+from paying, after a server-side upgrade), pass `revalidate: true`: the read skips the fresh answer
+and asks Entitler with its `ETag`, and a `304` still answers the kept body.
+
+```swift
+let fresh = try await customer.check(Features.sso, revalidate: true)
+```
 
 ## Every entitlement at once
 
@@ -48,6 +61,7 @@ if entitlements.has(Features.teamEssentials) {
   print("Team plan features are on")
 }
 let seats = entitlements[Features.teamSeats]?.value
+let upgrade = entitlements[Features.sso]?.upgrades.first?.name
 ```
 
 Groups are in the list with Entitler's decision, so `has` never expands a group itself. `has`

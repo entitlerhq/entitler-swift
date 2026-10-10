@@ -2,16 +2,23 @@
 
 ## A signed-out pricing page
 
-Pricing for signed-out visitors comes from your server, since an in-app credential cannot read it:
+An app's signed-out paywall reads pricing with a publishable key alone, with no backend route:
 
 ```swift
-let pricing = try await server.pricing(visitor: visitorID)
+let paywall = try EntitlerClient(key: "ent_pk_live_…")
+let pricing = try await paywall.pricing()
 for plan in pricing.plans where plan.kind == .plan {
   for listing in plan.listings {
     let purchasable = listing.channels.filter(\.purchasable)
-    print(plan.name, listing.period, purchasable.isEmpty ? "Coming soon" : "On sale")
+    print(plan.name, listing.period?.label ?? "", purchasable.isEmpty ? "Coming soon" : "On sale")
   }
 }
+```
+
+A web page's server reads it with the server client and the visitor's id:
+
+```swift
+let pricing = try await server.pricing(visitor: visitorID)
 ```
 
 Each period lists every payment connection with `purchasable`, the ids to buy it with and, for
@@ -40,6 +47,20 @@ The in-app client keeps its own visitor id and sends it on every request: on App
 let shared = UserDefaults(suiteName: "group.com.example.app")?.string(forKey: "visitor")
 let client = try EntitlerClient(tokenProvider: { try await api.entitlerToken() }, visitor: shared)
 ```
+
+## The visitor through sign-up
+
+The visitor's path through sign-up keeps their arm: a signed-out screen reads the stored visitor,
+with no client, and sends it with the app's own sign-up request; your server passes it to
+`register(visitor:)`. Reset it at sign-out and at account deletion, so the next person on a shared
+device is never linked to the last:
+
+```swift
+let signUpVisitor = storedVisitorID()
+resetStoredVisitor()
+```
+
+Both functions exist on Apple platforms, where the SDK keeps the visitor itself.
 
 ## A signed-in customer's pricing
 

@@ -21,8 +21,8 @@ swift build --build-tests -Xswiftc -warnings-as-errors
 swift test --skip EntitlerIntegrationTests --enable-code-coverage
 swift test --sanitize=thread --skip EntitlerIntegrationTests
 ENTITLER_TEST_KEY=… swift test --filter EntitlerIntegrationTests
-ENTITLER_DOCS=1 swift package generate-documentation --target Entitler --target EntitlerGenerator --warnings-as-errors
-python3 scripts/extract-snippets.py && (cd examples && swift build)
+ENTITLER_DOCS=1 swift package generate-documentation --target Entitler --target EntitlerTesting --target EntitlerGenerator --warnings-as-errors
+python3 scripts/extract-snippets.py && (cd examples && swift build --build-tests && swift test --skip-build)
 ```
 
 The required check is `All checks passed`. Keep its name, and keep every other job in its `needs`.
