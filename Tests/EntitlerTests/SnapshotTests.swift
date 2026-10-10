@@ -98,7 +98,7 @@ extension JSONWebKey {
     let signer = Signer(kid: "b")
     let other = Signer(kid: "a")
     let set = try JSONDecoder().decode(
-      JSONWebKeySet.self, from: JSONEncoder().encode(["keys": [other.jwk, signer.jwk]]))
+      SnapshotKeys.self, from: JSONEncoder().encode(["keys": [other.jwk, signer.jwk]]))
     let expected = SnapshotExpectation(
       keys: set, customer: "user_1", environment: "env_1", now: Self.now)
     _ = try verifySnapshot(signer.sign(claims: Self.claims()), expecting: expected)
@@ -290,7 +290,14 @@ extension JSONWebKey {
   @Test func scopesKeepOnlyKnownOnesInOrder() {
     #expect(
       Scope.known(["org:manage", "plans:publish", "plans:read"]) == [.plansRead, .orgManage])
-    #expect(Scope.allCases.count == 19)
+    #expect(
+      Scope.allCases.map(\.rawValue) == [
+        "plans:read", "entitlements:read", "usage:read", "usage:write", "billing:self",
+        "customers:register", "customers:read", "customers:write", "customers:profile",
+        "customers:sample", "tokens:mint", "plans:write", "plans:release", "tracks:manage",
+        "tracks:promote", "tracks:assign", "keys:manage", "members:manage", "projects:manage",
+        "org:manage",
+      ])
   }
 
   @Test func instantsParseAnyOffset() {
@@ -332,11 +339,12 @@ extension JSONWebKey {
     roundTrip(EnvironmentKind.self, ["test", "live"])
     roundTrip(Arm.self, ["control", "variant"])
     roundTrip(PlanKind.self, ["plan", "addon"])
-    roundTrip(MoveKind.self, ["subscribe", "move", "add", "replace"])
-    roundTrip(MoveDirection.self, ["up", "down", "cross"])
-    roundTrip(SellingMode.self, ["self-serve", "sales-led"])
+    roundTrip(Move.self, ["subscribe", "upgrade", "downgrade", "switch", "add", "replace"])
+    roundTrip(MoveAction.self, ["buy", "contact", "unavailable"])
+    roundTrip(ChangeEffect.self, ["now", "renewal"])
+    roundTrip(BillingMode.self, ["provider", "keep", "end"])
     roundTrip(ChangeTiming.self, ["now", "end"])
-    roundTrip(ImpactKind.self, ["Gains", "Loses", "Changes", "Same"])
+    roundTrip(ImpactKind.self, ["gains", "loses", "changes", "same"])
     roundTrip(PriceInterval.self, ["day", "week", "month", "year"])
     roundTrip(TaxBehaviour.self, ["inclusive", "exclusive", "unspecified"])
     roundTrip(PlanStatus.self, ["active", "legacy"])
@@ -361,26 +369,7 @@ extension JSONWebKey {
     roundTrip(PaymentStatus.self, ["declined", "requires_action", "processing", "pending"])
     roundTrip(ListingGapKind.self, ["stops_selling", "unlisted"])
     roundTrip(ListingProblemKind.self, ["price_not_found", "price_inactive", "interval_mismatch"])
-    roundTrip(
-      AlertRule.self,
-      [
-        "two_plans_in_product", "several_items", "price_without_listing", "addon_not_billed_here",
-        "second_product",
-        "other_connection", "held_plan_differs", "one_time_not_followed", "refund_partial",
-        "money_refused",
-        "unknown_customer", "not_followed", "long_past_due",
-      ])
-    roundTrip(
-      AlertRefusal.self,
-      [
-        "real_money_in_test_environment", "test_money_on_real_money_track",
-        "sandbox_builds_turned_off",
-      ])
-    roundTrip(AlertResolver.self, ["provider", "person"])
     roundTrip(EntitlementSourceType.self, ["plan", "addon", "grant", "banked", "group"])
-    roundTrip(PendingChangeType.self, ["move", "cancel"])
-    roundTrip(UpgradeMove.self, ["subscribe", "upgrade", "switch", "add"])
-    roundTrip(ProviderPaymentStatus.self, ["paid", "refunded", "partially_refunded"])
     roundTrip(
       UsageOutcome.self,
       ["recorded", "duplicate", "refused", "held", "settled", "released", "cancelled", "adjusted"])

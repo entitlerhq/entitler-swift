@@ -90,4 +90,6 @@ public actor MemoryCacheStore: CacheStore {
       entries[oldest.key] = nil
     }
   }
+
+  func removeAll() { entries = [:] }
 }

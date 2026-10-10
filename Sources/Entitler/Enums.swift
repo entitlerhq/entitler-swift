@@ -118,107 +118,11 @@ public enum PlanKind: RawRepresentable, Hashable, Sendable, Codable {
   }
 }
 
-/// How a move option changes the customer's plans.
-public enum MoveKind: RawRepresentable, Hashable, Sendable, Codable {
-  /// Subscribes to a plan in a product they hold nothing in.
-  case subscribe
-  /// Moves to another plan in the product.
-  case move
-  /// Adds an add-on.
-  case add
-  /// Replaces an add-on with another.
-  case replace
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "subscribe": self = .subscribe
-    case "move": self = .move
-    case "add": self = .add
-    case "replace": self = .replace
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .subscribe: "subscribe"
-    case .move: "move"
-    case .add: "add"
-    case .replace: "replace"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// Whether a move goes up, down or across.
-public enum MoveDirection: RawRepresentable, Hashable, Sendable, Codable {
-  /// An upgrade.
-  case up
-  /// A downgrade.
-  case down
-  /// A move across.
-  case cross
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "up": self = .up
-    case "down": self = .down
-    case "cross": self = .cross
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .up: "up"
-    case .down: "down"
-    case .cross: "cross"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// How a plan is sold.
-public enum SellingMode: RawRepresentable, Hashable, Sendable, Codable {
-  /// Customers take it themselves.
-  case selfServe
-  /// The vendor moves customers to it.
-  case salesLed
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "self-serve": self = .selfServe
-    case "sales-led": self = .salesLed
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .selfServe: "self-serve"
-    case .salesLed: "sales-led"
-    case .unknown(let value): value
-    }
-  }
-}
-
 /// When a change takes effect.
 public enum ChangeTiming: RawRepresentable, Hashable, Sendable, Codable {
   /// At once.
   case now
-  /// At the end of the period.
+  /// At renewal.
   case end
   /// A value this SDK does not know yet.
   case unknown(String)
@@ -242,6 +146,142 @@ public enum ChangeTiming: RawRepresentable, Hashable, Sendable, Codable {
   }
 }
 
+/// How a move changes the customer's plans.
+public enum Move: RawRepresentable, Hashable, Sendable, Codable {
+  /// Subscribes from no plan in a product.
+  case subscribe
+  /// Moves up to another plan.
+  case upgrade
+  /// Moves down to another plan.
+  case downgrade
+  /// Moves to another plan, neither up nor down.
+  case `switch`
+  /// Adds an add-on.
+  case add
+  /// Replaces an add-on with another.
+  case replace
+  /// A value this SDK does not know yet.
+  case unknown(String)
+
+  /// Creates the value from the API's string.
+  public init(rawValue: String) {
+    switch rawValue {
+    case "subscribe": self = .subscribe
+    case "upgrade": self = .upgrade
+    case "downgrade": self = .downgrade
+    case "switch": self = .switch
+    case "add": self = .add
+    case "replace": self = .replace
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  /// The API's string for the value.
+  public var rawValue: String {
+    switch self {
+    case .subscribe: "subscribe"
+    case .upgrade: "upgrade"
+    case .downgrade: "downgrade"
+    case .switch: "switch"
+    case .add: "add"
+    case .replace: "replace"
+    case .unknown(let value): value
+    }
+  }
+}
+
+/// Who can make a move.
+public enum MoveAction: RawRepresentable, Hashable, Sendable, Codable {
+  /// The customer can make it alone: show a button that calls `subscribe`.
+  case buy
+  /// A sales-led move, which only the company can make: show a way to contact sales.
+  case contact
+  /// Neither can make it now; the reason says why.
+  case unavailable
+  /// A value this SDK does not know yet.
+  case unknown(String)
+
+  /// Creates the value from the API's string.
+  public init(rawValue: String) {
+    switch rawValue {
+    case "buy": self = .buy
+    case "contact": self = .contact
+    case "unavailable": self = .unavailable
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  /// The API's string for the value.
+  public var rawValue: String {
+    switch self {
+    case .buy: "buy"
+    case .contact: "contact"
+    case .unavailable: "unavailable"
+    case .unknown(let value): value
+    }
+  }
+}
+
+/// When a plan change took effect or will.
+public enum ChangeEffect: RawRepresentable, Hashable, Sendable, Codable {
+  /// At once.
+  case now
+  /// At renewal, at the change's instant.
+  case renewal
+  /// A value this SDK does not know yet.
+  case unknown(String)
+
+  /// Creates the value from the API's string.
+  public init(rawValue: String) {
+    switch rawValue {
+    case "now": self = .now
+    case "renewal": self = .renewal
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  /// The API's string for the value.
+  public var rawValue: String {
+    switch self {
+    case .now: "now"
+    case .renewal: "renewal"
+    case .unknown(let value): value
+    }
+  }
+}
+
+/// How a company plan change meets the payment provider.
+public enum BillingMode: RawRepresentable, Hashable, Sendable, Codable {
+  /// Charges the change through the provider that bills the product.
+  case provider
+  /// Moves the customer in Entitler while the provider keeps billing the plan it bills.
+  case keep
+  /// Ends the provider's subscription when the change takes effect; the customer then holds the plan outside any provider.
+  case end
+  /// A value this SDK does not know yet.
+  case unknown(String)
+
+  /// Creates the value from the API's string.
+  public init(rawValue: String) {
+    switch rawValue {
+    case "provider": self = .provider
+    case "keep": self = .keep
+    case "end": self = .end
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  /// The API's string for the value.
+  public var rawValue: String {
+    switch self {
+    case .provider: "provider"
+    case .keep: "keep"
+    case .end: "end"
+    case .unknown(let value): value
+    }
+  }
+}
+
 /// How a move changes a feature.
 public enum ImpactKind: RawRepresentable, Hashable, Sendable, Codable {
   /// The customer gains it.
@@ -258,10 +298,10 @@ public enum ImpactKind: RawRepresentable, Hashable, Sendable, Codable {
   /// Creates the value from the API's string.
   public init(rawValue: String) {
     switch rawValue {
-    case "Gains": self = .gains
-    case "Loses": self = .loses
-    case "Changes": self = .changes
-    case "Same": self = .same
+    case "gains": self = .gains
+    case "loses": self = .loses
+    case "changes": self = .changes
+    case "same": self = .same
     default: self = .unknown(rawValue)
     }
   }
@@ -269,10 +309,10 @@ public enum ImpactKind: RawRepresentable, Hashable, Sendable, Codable {
   /// The API's string for the value.
   public var rawValue: String {
     switch self {
-    case .gains: "Gains"
-    case .loses: "Loses"
-    case .changes: "Changes"
-    case .same: "Same"
+    case .gains: "gains"
+    case .loses: "loses"
+    case .changes: "changes"
+    case .same: "same"
     case .unknown(let value): value
     }
   }
@@ -954,138 +994,6 @@ public enum ListingProblemKind: RawRepresentable, Hashable, Sendable, Codable {
   }
 }
 
-/// The rule a provider alert says was broken.
-public enum AlertRule: RawRepresentable, Hashable, Sendable, Codable {
-  /// Two plans in one product.
-  case twoPlansInProduct
-  /// Several items in one subscription.
-  case severalItems
-  /// A price no listing names.
-  case priceWithoutListing
-  /// An add-on billed elsewhere.
-  case addOnNotBilledHere
-  /// A second product.
-  case secondProduct
-  /// Another connection.
-  case otherConnection
-  /// The held plan differs from the billed one.
-  case heldPlanDiffers
-  /// A one-time payment was not followed.
-  case oneTimeNotFollowed
-  /// A partial refund.
-  case refundPartial
-  /// Money was refused.
-  case moneyRefused
-  /// An unknown customer.
-  case unknownCustomer
-  /// A subscription was not followed.
-  case notFollowed
-  /// Long past due.
-  case longPastDue
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "two_plans_in_product": self = .twoPlansInProduct
-    case "several_items": self = .severalItems
-    case "price_without_listing": self = .priceWithoutListing
-    case "addon_not_billed_here": self = .addOnNotBilledHere
-    case "second_product": self = .secondProduct
-    case "other_connection": self = .otherConnection
-    case "held_plan_differs": self = .heldPlanDiffers
-    case "one_time_not_followed": self = .oneTimeNotFollowed
-    case "refund_partial": self = .refundPartial
-    case "money_refused": self = .moneyRefused
-    case "unknown_customer": self = .unknownCustomer
-    case "not_followed": self = .notFollowed
-    case "long_past_due": self = .longPastDue
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .twoPlansInProduct: "two_plans_in_product"
-    case .severalItems: "several_items"
-    case .priceWithoutListing: "price_without_listing"
-    case .addOnNotBilledHere: "addon_not_billed_here"
-    case .secondProduct: "second_product"
-    case .otherConnection: "other_connection"
-    case .heldPlanDiffers: "held_plan_differs"
-    case .oneTimeNotFollowed: "one_time_not_followed"
-    case .refundPartial: "refund_partial"
-    case .moneyRefused: "money_refused"
-    case .unknownCustomer: "unknown_customer"
-    case .notFollowed: "not_followed"
-    case .longPastDue: "long_past_due"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// Why a purchase was refused.
-public enum AlertRefusal: RawRepresentable, Hashable, Sendable, Codable {
-  /// Real money in a test environment.
-  case realMoneyInTestEnvironment
-  /// Test money on a real-money track.
-  case testMoneyOnRealMoneyTrack
-  /// Sandbox builds are turned off.
-  case sandboxBuildsTurnedOff
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "real_money_in_test_environment": self = .realMoneyInTestEnvironment
-    case "test_money_on_real_money_track": self = .testMoneyOnRealMoneyTrack
-    case "sandbox_builds_turned_off": self = .sandboxBuildsTurnedOff
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .realMoneyInTestEnvironment: "real_money_in_test_environment"
-    case .testMoneyOnRealMoneyTrack: "test_money_on_real_money_track"
-    case .sandboxBuildsTurnedOff: "sandbox_builds_turned_off"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// Who resolved an alert.
-public enum AlertResolver: RawRepresentable, Hashable, Sendable, Codable {
-  /// The provider.
-  case provider
-  /// A person.
-  case person
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "provider": self = .provider
-    case "person": self = .person
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .provider: "provider"
-    case .person: "person"
-    case .unknown(let value): value
-    }
-  }
-}
-
 /// Where an entitlement comes from.
 public enum EntitlementSourceType: RawRepresentable, Hashable, Sendable, Codable {
   /// A plan the customer holds.
@@ -1121,102 +1029,6 @@ public enum EntitlementSourceType: RawRepresentable, Hashable, Sendable, Codable
     case .grant: "grant"
     case .banked: "banked"
     case .group: "group"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// A change booked for the end of the period.
-public enum PendingChangeType: RawRepresentable, Hashable, Sendable, Codable {
-  /// A move to another plan.
-  case move
-  /// A cancellation.
-  case cancel
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "move": self = .move
-    case "cancel": self = .cancel
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .move: "move"
-    case .cancel: "cancel"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// How a customer would take a plan that gives a feature.
-public enum UpgradeMove: RawRepresentable, Hashable, Sendable, Codable {
-  /// Subscribe to it.
-  case subscribe
-  /// Upgrade to it.
-  case upgrade
-  /// Switch to it.
-  case `switch`
-  /// Add it.
-  case add
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "subscribe": self = .subscribe
-    case "upgrade": self = .upgrade
-    case "switch": self = .switch
-    case "add": self = .add
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .subscribe: "subscribe"
-    case .upgrade: "upgrade"
-    case .switch: "switch"
-    case .add: "add"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// The state of a one-time payment.
-public enum ProviderPaymentStatus: RawRepresentable, Hashable, Sendable, Codable {
-  /// Paid.
-  case paid
-  /// Refunded.
-  case refunded
-  /// Partly refunded.
-  case partiallyRefunded
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "paid": self = .paid
-    case "refunded": self = .refunded
-    case "partially_refunded": self = .partiallyRefunded
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .paid: "paid"
-    case .refunded: "refunded"
-    case .partiallyRefunded: "partially_refunded"
     case .unknown(let value): value
     }
   }

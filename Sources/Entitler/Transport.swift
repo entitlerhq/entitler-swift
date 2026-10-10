@@ -24,9 +24,12 @@ struct Hooks: Sendable {
 
 enum Credential: Sendable {
   case server(key: String)
+  case publishable(key: String)
   case token(TokenSource)
   case identity(key: String, TokenSource)
 }
+
+package typealias Exchange = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
 struct Request: Sendable {
   var method: String
@@ -37,6 +40,8 @@ struct Request: Sendable {
   var visitor: String?
   var timeout: TimeInterval?
   var customer: String?
+  var asOf: Date?
+  var revalidate = false
   var changesAnswers = true
   var authenticated = true
 
@@ -58,6 +63,7 @@ struct Response: Sendable {
   let age: Int?
   let retryAfter: TimeInterval?
   var requestID: String? = nil
+  var replayed = false
 
   var noStore: Bool { cacheControl?.lowercased().contains("no-store") ?? false }
 }
@@ -128,27 +134,78 @@ final class RedirectRefuser: NSObject, URLSessionTaskDelegate, Sendable {
 
 final class Core: Sendable, CustomReflectable {
   let options: EntitlerOptions
+  let cache: (any CacheStore)?
   let credential: Credential
   let visitor: String?
+  let exchange: Exchange?
   let state = ClientState()
+  private let closed = LockedValue(false)
+  private let running = LockedValue<[UInt64: @Sendable () -> Void]>([:])
+  private let counter = LockedValue<UInt64>(0)
 
-  init(options: EntitlerOptions, credential: Credential, visitor: String?) throws {
-    self.options = try options.validated()
+  init(
+    options: EntitlerOptions, cache: (any CacheStore)?, credential: Credential, visitor: String?,
+    exchange: Exchange? = nil
+  ) {
+    self.options = options
+    self.cache = cache
     self.credential = credential
     self.visitor = visitor
+    self.exchange = exchange
   }
 
   var kind: String {
     switch credential {
     case .server: "server"
+    case .publishable: "in-app, publishable key"
     case .token: "in-app, customer token"
     case .identity: "in-app, identity token"
     }
   }
 
-  var isInApp: Bool {
-    if case .server = credential { return false }
-    return true
+  var isSignedIn: Bool {
+    switch credential {
+    case .token, .identity: true
+    case .server, .publishable: false
+    }
+  }
+
+  func close() {
+    guard !closed.swap(true) else { return }
+    for cancel in running.swap([:]).values { cancel() }
+    switch credential {
+    case .token(let source), .identity(_, let source): Task { await source.cancel() }
+    case .server, .publishable: break
+    }
+    if let memory = cache as? MemoryCacheStore { Task { await memory.removeAll() } }
+  }
+
+  func checkOpen() throws {
+    if closed.read() { throw ClientClosedError() }
+  }
+
+  func guarded<Value: Sendable>(_ work: @escaping @Sendable () async throws -> Value)
+    async throws -> Value
+  {
+    try checkOpen()
+    let task = Task { try await work() }
+    let id = counter.update { value -> UInt64 in
+      value += 1
+      return value
+    }
+    running.update { $0[id] = { task.cancel() } }
+    if closed.read() { task.cancel() }
+    defer { running.update { $0[id] = nil } }
+    do {
+      return try await withTaskCancellationHandler {
+        try await task.value
+      } onCancel: {
+        task.cancel()
+      }
+    } catch {
+      if closed.read() { throw ClientClosedError() }
+      throw error
+    }
   }
 
   var customMirror: Mirror { Mirror(self, children: ["baseURL": options.base, "kind": kind]) }
@@ -157,18 +214,22 @@ final class Core: Sendable, CustomReflectable {
     options.onError?(error)
   }
 
-  func call<Answer: Decodable>(_ request: Request) async throws -> Answer {
-    let response = try await send(request)
-    return try decode(response)
+  func call<Answer: Decodable & Sendable>(_ request: Request) async throws -> Answer {
+    try await guarded { [self] in try decode(await send(request)) }
+  }
+
+  func callWithoutAnswer(_ request: Request) async throws {
+    try await guarded { [self] in _ = try await send(request) }
   }
 
   private func decode<Answer: Decodable>(_ response: Response) throws -> Answer {
     do {
-      let answer = try JSON.decoder().decode(Answer.self, from: response.body)
+      var answer = try JSON.decoder().decode(Answer.self, from: response.body)
       if let checked = answer as? any MeterChecked, !checked.hasValidMeters {
         throw DecodingError.dataCorrupted(
           DecodingError.Context(codingPath: [], debugDescription: "A meter's remaining is true."))
       }
+      if response.replayed { answer = markedReplayed(answer) }
       return answer
     } catch {
       throw EntitlerError.api(
@@ -180,24 +241,22 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  func cachedCall<Answer: Decodable>(_ request: Request) async throws -> Answer {
-    guard let cache = options.cache else { return try await call(request) }
+  func cachedCall<Answer: Decodable & Sendable>(_ request: Request) async throws -> Answer {
+    guard let cache else { return try await call(request) }
+    return try await guarded { [self] in try await cachedAnswer(request, cache: cache) }
+  }
+
+  private func cachedAnswer<Answer: Decodable>(_ request: Request, cache: any CacheStore)
+    async throws -> Answer
+  {
     let hooks = Hooks.current
-    let token: String?
-    do {
-      token = request.authenticated ? try await currentToken() : nil
-    } catch let error as EntitlerError {
-      guard case .token = error, let previous = await previousToken(),
-        let kept = await entry(cacheKey(request, token: previous), in: cache),
-        hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor
-      else { throw error }
-      report(error)
-      return markedStale(try decode(Response(kept)))
-    }
+    let token = request.authenticated ? try await currentToken() : nil
     let key = cacheKey(request, token: token)
     let kept = await entry(key, in: cache)
     let started = await state.generation(of: request.customer)
-    if let kept, kept.isFresh(at: hooks.now()), started.at.map({ $0 < kept.receivedAt }) ?? true {
+    if !request.revalidate, let kept, kept.isFresh(at: hooks.now()),
+      started.at.map({ $0 < kept.receivedAt }) ?? true
+    {
       return try decode(Response(kept))
     }
     if let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor,
@@ -237,7 +296,7 @@ final class Core: Sendable, CustomReflectable {
         await store(entry, key: key, in: cache)
       }
       return answer
-    } catch let error as EntitlerError where error.isUnreachable {
+    } catch let error as EntitlerError where error.isUnreachable && !error.isTokenError {
       let retryAfter = error.apiError?.retryAfter ?? 0
       await state.unreachable(until: hooks.now().addingTimeInterval(max(30, retryAfter)))
       guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor else {
@@ -266,20 +325,11 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func previousToken() async -> String? {
-    switch credential {
-    case .server: return nil
-    case .token(let source), .identity(_, let source):
-      if let current = await source.current { return current }
-      return await source.previous
-    }
-  }
-
   func cacheKey(_ request: Request, token: String?) -> String {
     let kind: String
     let secret: String
     switch credential {
-    case .server(let key):
+    case .server(let key), .publishable(let key):
       kind = "key"
       secret = key
     case .token:
@@ -292,7 +342,7 @@ final class Core: Sendable, CustomReflectable {
     let parts: [String?] = [
       "entitler-cache-v1", request.method.uppercased(), urlString(for: request), kind,
       sha256(secret),
-      options.asOf.map(formatInstant), request.visitor ?? visitor,
+      request.asOf.map(formatInstant), request.visitor ?? visitor,
     ]
     return sha256("[" + parts.map { $0.map(jsonString) ?? "null" }.joined(separator: ",") + "]")
   }
@@ -344,7 +394,7 @@ final class Core: Sendable, CustomReflectable {
         }
         let response = Response(http, body: body, now: hooks.now())
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
-          if isInApp, let named = try? JSON.decoder().decode(Named.self, from: body) {
+          if isSignedIn, let named = try? JSON.decoder().decode(Named.self, from: body) {
             await state.setSignedInID(named.customer)
           }
           return response
@@ -375,10 +425,14 @@ final class Core: Sendable, CustomReflectable {
     async throws -> (Data, HTTPURLResponse)
   {
     let session = options.session
+    let exchange = exchange
     let hooks = Hooks.current
     do {
       let answer = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) { group in
-        group.addTask { try await session.data(for: request, delegate: RedirectRefuser.shared) }
+        group.addTask {
+          if let exchange { return try await exchange(request) }
+          return try await session.data(for: request, delegate: RedirectRefuser.shared)
+        }
         group.addTask {
           try await hooks.deadline(timeout)
           return nil
@@ -427,13 +481,13 @@ final class Core: Sendable, CustomReflectable {
       if let token { headers["Authorization"] = "Bearer \(token)" }
     }
     if let visitor = request.visitor ?? visitor { headers["Entitler-Visitor"] = visitor }
-    if let asOf = options.asOf { headers["Entitler-As-Of"] = formatInstant(asOf) }
+    if let asOf = request.asOf { headers["Entitler-As-Of"] = formatInstant(asOf) }
     return headers
   }
 
   private func currentToken() async throws -> String {
     switch credential {
-    case .server(let key): key
+    case .server(let key), .publishable(let key): key
     case .token(let source), .identity(_, let source):
       try await source.token(now: Hooks.current.now(), timeout: options.timeout)
     }
@@ -441,7 +495,7 @@ final class Core: Sendable, CustomReflectable {
 
   private func refresh(replacing token: String) async throws -> String? {
     switch credential {
-    case .server: nil
+    case .server, .publishable: nil
     case .token(let source), .identity(_, let source):
       try await source.refresh(replacing: token, now: Hooks.current.now(), timeout: options.timeout)
     }
@@ -546,7 +600,9 @@ extension Response {
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
         Entitler.retryAfter($0, now: now)
       },
-      requestID: http.value(forHTTPHeaderField: "x-request-id"))
+      requestID: http.value(forHTTPHeaderField: "x-request-id"),
+      replayed: http.value(forHTTPHeaderField: "Idempotent-Replayed")?.trimmed.lowercased()
+        == "true")
   }
 }
 

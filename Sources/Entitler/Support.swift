@@ -10,6 +10,9 @@ public enum Scope: String, CaseIterable, Codable, Hashable, Sendable {
   case usageRead = "usage:read"
   /// Record usage.
   case usageWrite = "usage:write"
+  /// Buy for the customer the credential names: subscribe, cancel, undo, the billing portal and
+  /// the billing sync. Mint it only for people who may buy for the customer.
+  case billingSelf = "billing:self"
   /// Register customers.
   case customersRegister = "customers:register"
   /// Read customers.
@@ -73,6 +76,16 @@ protocol MeterChecked {
 
 extension Optional where Wrapped == FeatureValue {
   var isMeterAmount: Bool { self != .on }
+}
+
+protocol Replaying {
+  var replayed: Bool { get set }
+}
+
+func markedReplayed<Value>(_ value: Value) -> Value {
+  guard var marked = value as? any Replaying else { return value }
+  marked.replayed = true
+  return (marked as? Value) ?? value
 }
 
 func markedStale<Value>(_ value: Value) -> Value {
@@ -189,7 +202,14 @@ enum Messages {
   static let asOf = "Pass asOf as a valid date."
   static let idempotencyKey = "Pass idempotencyKey as 1 to 200 printable ASCII characters."
   static let holdKey = "Pass idempotencyKey as 1 to 193 printable ASCII characters."
-  static let batchKey = "Pass idempotencyKey as 1 to 190 printable ASCII characters."
+  static let track = "Name the track by its name."
+  static let addOnOrProduct = "Pass either addOn or product, not both."
+  static let adjustment =
+    "Pass either by, a whole number other than 0, or to, a whole number of 0 or more."
+  static let publishableOnServer =
+    "A publishable key belongs in EntitlerClient. Use a secret key from the dashboard on your server."
+  static let secretInApp =
+    "A secret key belongs on your server, in EntitlerServer. Use a publishable key (ent_pk_…) in an app."
   static let expectation = "Provide the customer and environment the snapshot must be for."
   static let dots = "Pass an id that is not made only of dots."
   static let amount = "Pass amount as a whole number from 1 to 9007199254740991."

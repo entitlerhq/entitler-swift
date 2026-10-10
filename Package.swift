@@ -7,6 +7,7 @@ let package = Package(
   platforms: [.iOS(.v15), .macOS(.v12), .tvOS(.v15), .watchOS(.v8), .visionOS(.v1)],
   products: [
     .library(name: "Entitler", targets: ["Entitler"]),
+    .library(name: "EntitlerTesting", targets: ["EntitlerTesting"]),
     .library(name: "EntitlerGenerator", targets: ["EntitlerGenerator"]),
     .executable(name: "entitler", targets: ["EntitlerCommand"]),
     .plugin(name: "entitler-generate", targets: ["EntitlerGenerate"]),
@@ -21,6 +22,7 @@ let package = Package(
         .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux]))
       ]
     ),
+    .target(name: "EntitlerTesting", dependencies: ["Entitler"]),
     .target(name: "EntitlerGenerator", dependencies: ["Entitler"]),
     .executableTarget(name: "EntitlerCommand", dependencies: ["Entitler", "EntitlerGenerator"]),
     .plugin(
@@ -40,7 +42,8 @@ let package = Package(
       ),
       dependencies: ["EntitlerCommand"]
     ),
-    .testTarget(name: "EntitlerTests", dependencies: ["Entitler", "EntitlerGenerator"]),
+    .testTarget(
+      name: "EntitlerTests", dependencies: ["Entitler", "EntitlerGenerator", "EntitlerTesting"]),
     .testTarget(name: "EntitlerIntegrationTests", dependencies: ["Entitler"]),
   ]
 )

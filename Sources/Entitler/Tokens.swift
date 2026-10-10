@@ -66,7 +66,7 @@ actor TokenSource {
     do {
       token = try await waitCancellably(for: task)
     } catch {
-      if refreshing == task { refreshing = nil }
+      if refreshing == task, !Task.isCancelled { refreshing = nil }
       throw error
     }
     if refreshing == task {
@@ -125,6 +125,11 @@ actor TokenSource {
     }
   }
 
+  func cancel() {
+    refreshing?.cancel()
+    refreshing = nil
+  }
+
   static func refreshTime(of token: String, receivedAt: Date) -> Date? {
     guard let lifetime = JWT.lifetime(token) else { return nil }
     let exp = TimeInterval(lifetime.exp)
@@ -166,6 +171,21 @@ final class LockedValue<Value>: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return value
+  }
+
+  func swap(_ replacement: Value) -> Value {
+    lock.lock()
+    defer { lock.unlock() }
+    let old = value
+    value = replacement
+    return old
+  }
+
+  @discardableResult
+  func update<Result>(_ change: (inout Value) -> Result) -> Result {
+    lock.lock()
+    defer { lock.unlock() }
+    return change(&value)
   }
 }
 

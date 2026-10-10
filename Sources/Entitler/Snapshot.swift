@@ -25,7 +25,7 @@ public struct JSONWebKey: Codable, Hashable, Sendable {
 }
 
 /// The keys that verify snapshots, as a JSON Web Key Set.
-public struct JSONWebKeySet: Codable, Hashable, Sendable {
+public struct SnapshotKeys: Codable, Hashable, Sendable {
   /// The keys.
   public let keys: [JSONWebKey]
 }
@@ -66,7 +66,7 @@ public struct SnapshotExpectation: Sendable {
 
   /// Creates an expectation from a key set.
   public init(
-    keys: JSONWebKeySet, customer: String, environment: String,
+    keys: SnapshotKeys, customer: String, environment: String,
     issuer: String = "https://api.entitler.dev/customers", now: Date? = nil,
     clockSkewSeconds: Int = 60
   ) {
@@ -117,7 +117,7 @@ private struct SnapshotClaims: Decodable {
   let exp: Int64
 }
 
-/// Verifies an offline snapshot from ``Customer/snapshot(ttlSeconds:idempotencyKey:timeout:)`` with no request.
+/// Verifies an offline snapshot from ``Customer/snapshot(ttlSeconds:timeout:)`` with no request.
 ///
 /// ```swift
 /// let snapshot = try verifySnapshot(token, expecting: SnapshotExpectation(

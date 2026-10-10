@@ -233,6 +233,82 @@ let sampleCatalogue = [
     #expect(api.count == 0)
   }
 
+  @Test func anEmptyListNeverEmptiesAnExistingFile() async throws {
+    let api = FakeAPI { [self] _ in catalogue(feature("sso", "boolean")) }
+    let file = temporaryFile()
+    defer { try? FileManager.default.removeItem(atPath: file) }
+    var (code, lines) = await run(["generate", "--out", file], api: api)
+    #expect(code == 0)
+    let written = try String(contentsOfFile: file, encoding: .utf8)
+    api.answer { [self] _ in catalogue("") }
+    (code, lines) = await run(["generate", "--out", file], api: api)
+    #expect(code == 1)
+    #expect(
+      lines == [
+        "Entitler listed no features, so \(file) was left as it is. Check the key's environment, or pass --allow-empty."
+      ])
+    #expect(try String(contentsOfFile: file, encoding: .utf8) == written)
+    (code, lines) = await run(["generate", "--out", file, "--allow-empty"], api: api)
+    #expect(code == 0)
+    #expect(lines == ["Wrote 0 features to \(file)."])
+    (code, lines) = await run(["generate", "--out", file], api: api)
+    #expect(code == 0)
+  }
+
+  @Test func snapshotKeysAreWrittenWithoutAKey() async throws {
+    let api = FakeAPI { _ in
+      .json(
+        #"{"keys":[{"kty":"EC","crv":"P-256","x":"x1","y":"y1","kid":"k1","alg":"ES256","use":"sig"},{"kty":"EC","crv":"P-256","x":"x2","y":"y2","kid":"k2","alg":"ES256","use":"sig"}]}"#
+      )
+    }
+    let file = temporaryFile()
+    defer { try? FileManager.default.removeItem(atPath: file) }
+    var (code, lines) = await run(
+      ["snapshot-keys", "--out", file], api: api, environment: [:])
+    #expect(code == 0)
+    #expect(lines == ["Wrote 2 snapshot keys to \(file)."])
+    #expect(api.last.path == "/customers/snapshot-keys")
+    #expect(api.last.header("Authorization") == nil)
+    let written = try String(contentsOfFile: file, encoding: .utf8)
+    #expect(
+      written.hasPrefix(
+        "{\n  \"keys\": [\n    {\n      \"kty\": \"EC\",\n      \"crv\": \"P-256\","))
+    #expect(written.hasSuffix("\n    }\n  ]\n}\n"))
+    let decoded = try JSONDecoder().decode(SnapshotKeys.self, from: Data(written.utf8))
+    #expect(decoded.keys.map(\.kid) == ["k1", "k2"])
+    api.answer { _ in
+      .json(
+        #"{"keys":[{"kty":"EC","crv":"P-256","x":"x","y":"y","kid":"k","alg":"ES256","use":"sig"}]}"#
+      )
+    }
+    (code, lines) = await run(["snapshot-keys", "--out=\(file)"], api: api)
+    #expect(lines == ["Wrote 1 snapshot key to \(file)."])
+    api.answer { _ in .json(#"{"keys":[]}"#) }
+    (code, lines) = await run(["snapshot-keys", "--out", file], api: api)
+    #expect(code == 1)
+    #expect(lines == ["Entitler published no snapshot keys, so \(file) was left as it is."])
+    #expect(try String(contentsOfFile: file, encoding: .utf8).contains("\"kid\": \"k\""))
+    (code, lines) = await run(["snapshot-keys", "--help"], api: api)
+    #expect(code == 0)
+    (code, lines) = await run(["snapshot-keys", "--key", "k"], api: api)
+    #expect(code == 1)
+    api.answer { _ in .error(503, code: "unavailable", message: "Down.") }
+    (code, lines) = await run(["snapshot-keys", "--out", file], api: api)
+    #expect(code == 1)
+    #expect(lines == ["Entitler request failed: Down (unavailable)."])
+    let missing = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "entitler-\(UUID().uuidString)/keys.json"
+    ).path
+    api.answer { _ in
+      .json(
+        #"{"keys":[{"kty":"EC","crv":"P-256","x":"x","y":"y","kid":"k","alg":"ES256","use":"sig"}]}"#
+      )
+    }
+    (code, lines) = await run(["snapshot-keys", "--out", missing], api: api)
+    #expect(code == 1)
+    #expect(lines.first?.hasPrefix("Could not write \(missing)") == true)
+  }
+
   @Test func apiFailuresAreReported() async {
     let api = FakeAPI { _ in
       .error(403, code: "scope_required", message: "The key needs plans:read.")

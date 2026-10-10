@@ -14,23 +14,44 @@ import Testing
     #expect(
       throws: ArgumentError(message: "Provide the identity token your sign-in provider issued.")
     ) {
-      try EntitlerClient(key: "pk_1", identityToken: " ")
+      try EntitlerClient(key: "ent_pk_test_1", identityToken: " ")
     }
     #expect(throws: ArgumentError(message: "Provide an Entitler API key from the dashboard.")) {
       try EntitlerClient(key: "", identityTokenProvider: { "x" })
+    }
+    #expect(throws: ArgumentError(message: "Provide an Entitler API key from the dashboard.")) {
+      try EntitlerClient(key: " \t")
     }
     #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer.")) {
       try EntitlerServer(key: "sk").customer(" ")
     }
   }
 
-  @Test func invalidVisitorAndAsOfThrow() throws {
+  @Test func eachClientRefusesTheOtherKind() {
+    let publishable =
+      "A publishable key belongs in EntitlerClient. Use a secret key from the dashboard on your server."
+    let secret =
+      "A secret key belongs on your server, in EntitlerServer. Use a publishable key (ent_pk_…) in an app."
+    #expect(throws: ArgumentError(message: publishable)) {
+      try EntitlerServer(key: " ent_pk_live_1 ")
+    }
+    #expect(throws: ArgumentError(message: secret)) { try EntitlerClient(key: "ent_live_1") }
+    #expect(throws: ArgumentError(message: secret)) {
+      try EntitlerClient(key: "ent_test_1", identityToken: "id")
+    }
+    #expect(throws: ArgumentError(message: secret)) {
+      try EntitlerClient(key: "ent_test_1", identityTokenProvider: { "id" })
+    }
+    #expect(
+      throws: ArgumentError(message: "Provide the identity token your sign-in provider issued.")
+    ) {
+      try EntitlerClient(key: "ent_test_1", identityToken: "")
+    }
+  }
+
+  @Test func invalidVisitorThrows() throws {
     #expect(throws: ArgumentError(message: Messages.visitor)) {
       try EntitlerClient(token: "t", visitor: "short")
-    }
-    #expect(throws: ArgumentError(message: "Pass asOf as a valid date.")) {
-      try EntitlerServer(
-        key: "sk", options: EntitlerOptions(asOf: Date(timeIntervalSince1970: .nan)))
     }
     let client = try EntitlerClient(tokenProvider: { "x" }, visitor: "abcdefghijklmnop")
     #expect(client.visitor == "abcdefghijklmnop")
@@ -40,12 +61,17 @@ import Testing
     let server = try EntitlerServer(
       key: "sk_secret", options: EntitlerOptions(baseURL: URL(string: "https://x.test//")!))
     #expect(server.description == "EntitlerServer(https://x.test)")
-    let client = try EntitlerClient(key: "pk_secret", identityToken: "id_secret")
+    let client = try EntitlerClient(key: "ent_pk_secret", identityToken: "id_secret")
     #expect(
       client.description == "EntitlerClient(in-app, identity token, https://api.entitler.dev)")
     let tokenClient = try EntitlerClient(token: "tok_secret")
     #expect(tokenClient.description.contains("customer token"))
-    for value in [server as Any, client, tokenClient, try server.customer("u"), client.me] {
+    let keyClient = try EntitlerClient(key: "ent_pk_secret")
+    #expect(
+      keyClient.description == "EntitlerClient(in-app, publishable key, https://api.entitler.dev)")
+    for value in [
+      server as Any, client, tokenClient, keyClient, try server.customer("u"), client.me,
+    ] {
       var dumped = ""
       dump(value, to: &dumped)
       #expect(!dumped.contains("secret"))
@@ -68,15 +94,44 @@ import Testing
     #if canImport(Darwin)
       #expect(UserDefaults.standard.string(forKey: "entitler.visitor") == client.visitor)
       #expect(try EntitlerClient(token: "t").visitor == client.visitor)
+      #expect(storedVisitorID() == client.visitor)
+      resetStoredVisitor()
+      let next = storedVisitorID()
+      #expect(next != client.visitor)
+      #expect(storedVisitorID() == next)
     #endif
+  }
+
+  @Test func keyOnlyClientReadsPricingWithItsVisitor() async throws {
+    let api = FakeAPI { _ in
+      .json(Fixture.pricing, headers: ["Cache-Control": "private, max-age=60", "ETag": "\"p\""])
+    }
+    let client = try EntitlerClient(
+      key: " ent_pk_test_1 ", visitor: "abcdefghijklmnop", options: api.options())
+    try await api.run {
+      _ = try await client.pricing()
+      #expect(api.last.path == "/pricing")
+      #expect(api.last.header("Authorization") == "Bearer ent_pk_test_1")
+      #expect(api.last.header("Entitler-Visitor") == "abcdefghijklmnop")
+      _ = try await client.pricing()
+      #expect(api.count == 1)
+      _ = try await client.pricing(revalidate: true)
+      #expect(api.count == 2)
+      #expect(api.last.header("If-None-Match") == "\"p\"")
+      _ = try await client.pricing(visitor: "qrstuvwxyz012345")
+      #expect(api.last.header("Entitler-Visitor") == "qrstuvwxyz012345")
+    }
   }
 }
 
 @Suite struct RequestTests {
   @Test func checkSendsHeadersAndEncodesPath() async throws {
     let api = FakeAPI { _ in .json(Fixture.check()) }
-    let server = try api.server { $0.asOf = Date(timeIntervalSince1970: 1_782_898_200) }
-    let check = try await api.run { try await server.customer("google:a/b c").check("sso") }
+    let server = try api.server()
+    let check = try await api.run {
+      try await server.customer("google:a/b c").check(
+        "sso", asOf: Date(timeIntervalSince1970: 1_782_898_200))
+    }
     #expect(check.entitled)
     #expect(check.value == .on)
     #expect(check.sources.first?.plan == "pro")
@@ -140,7 +195,7 @@ import Testing
         )
       default:
         .json(
-          #"{\#(Fixture.context),"customer":null,"defaultPlan":"free","products":[{"key":"app","name":"App","defaultPlan":"free"}],"plans":[{"id":"p","key":"pro","name":"Pro","description":"","kind":"plan","product":"app","salesLed":false,"status":"active","version":1,"default":false,"periods":[{"label":"monthly","count":1,"unit":"months"}],"attachesTo":[],"features":{"sso":true,"seats":5,"credits":"unlimited"},"listings":[{"period":"monthly","channels":[{"channel":{"provider":"stripe","connectionId":"c1"},"name":"Stripe","mode":"test","purchasable":true,"ids":{"price":"price_1"},"price":{"amount":1000,"currency":"aud","interval":"month","intervalCount":1,"tax":"exclusive"}}]}]}]}"#
+          #"{\#(Fixture.context),"customer":null,"defaultPlan":"free","products":[{"key":"app","name":"App","defaultPlan":"free"}],"plans":[{"id":"p","key":"pro","name":"Pro","description":"","kind":"plan","product":"app","salesLed":false,"status":"active","version":1,"default":false,"periods":[{"label":"monthly","count":1,"unit":"months"}],"attachesTo":[],"features":{"sso":true,"seats":5,"credits":"unlimited"},"listings":[{"period":{"key":"monthly","label":"Monthly"},"channels":[{"channel":{"provider":"stripe","connectionId":"c1"},"name":"Stripe","mode":"test","purchasable":true,"ids":{"price":"price_1"},"price":{"amount":1000,"currency":"aud","interval":"month","intervalCount":1,"tax":"exclusive"}}]}]}]}"#
         )
       }
     }
@@ -163,6 +218,7 @@ import Testing
       #expect(plan.features["seats"] == .amount(5))
       #expect(plan.listings.first?.channels.first?.price?.interval == .month)
       #expect(plan.listings.first?.channels.first?.channel.connectionID == "c1")
+      #expect(plan.listings.first?.period?.key == "monthly")
       #expect(!plan.isDefault)
       #expect(pricing.customer == nil)
     }
@@ -215,7 +271,7 @@ import Testing
       try await api.run { try await api.server().customer("u").billing() }
     }
     do {
-      _ = try await api.run { try await api.server().customer("u").providers() }
+      _ = try await api.run { try await api.server().customer("u").details() }
     } catch EntitlerError.api(let error) {
       #expect(error.status == 200)
       #expect(error.code == .invalidResponse)

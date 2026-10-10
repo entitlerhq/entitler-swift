@@ -31,8 +31,11 @@ func validIdempotencyKey(
   return key
 }
 
-func storedVisitor() -> String {
-  #if canImport(Darwin)
+#if canImport(Darwin)
+  /// The visitor id the in-app client keeps in `UserDefaults.standard`, creating and keeping one
+  /// when none is kept. Needs no client: a signed-out screen sends it with the app's sign-up
+  /// request, so the server's `register(visitor:)` keeps the person's experiment arm.
+  public func storedVisitorID() -> String {
     let key = "entitler.visitor"
     if let kept = UserDefaults.standard.string(forKey: key), (try? validVisitor(kept)) != nil {
       return kept
@@ -40,7 +43,15 @@ func storedVisitor() -> String {
     let visitor = newVisitorID()
     UserDefaults.standard.set(visitor, forKey: key)
     return visitor
-  #else
-    return newVisitorID()
-  #endif
-}
+  }
+
+  /// Forgets the kept visitor id, so the next read creates a new one. Call it at sign-out and at
+  /// account deletion, so the next person on a shared device is never linked to the last.
+  public func resetStoredVisitor() {
+    UserDefaults.standard.removeObject(forKey: "entitler.visitor")
+  }
+
+  func storedVisitor() -> String { storedVisitorID() }
+#else
+  func storedVisitor() -> String { newVisitorID() }
+#endif

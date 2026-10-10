@@ -4,28 +4,60 @@ import Testing
 @testable import Entitler
 
 @Suite struct UsageTests {
-  @Test func recordUsageSendsOnlyGivenFields() async throws {
-    let api = FakeAPI { _ in .json(Fixture.usage(), status: 201) }
+  static let credits = Feature<Metered>("ai_credits")
+
+  @Test func recordUsageSendsTheCallersKeyAndOnlyGivenFields() async throws {
+    let api = FakeAPI { request in
+      .json(
+        Fixture.usage(), status: 201,
+        headers: request.header("Idempotency-Key") == "job-2"
+          ? ["Idempotent-Replayed": "true"] : [:])
+    }
     let customer = try api.server().customer("u")
     try await api.run {
-      let result = try await customer.recordUsage(of: Feature<Metered>("ai_credits"), amount: 3)
+      let result = try await customer.recordUsage(
+        of: Self.credits, amount: 3, idempotencyKey: "job-1")
       #expect(result.outcome == .recorded)
       #expect(result.reportedAs == .api)
       #expect(result.mode == .gate)
+      #expect(!result.replayed)
       #expect(api.last.method == "POST")
       #expect(api.last.path == "/customers/u/usage")
       #expect(api.last.header("Content-Type") == "application/json")
-      #expect(api.last.header("Idempotency-Key")?.count == 36)
+      #expect(api.last.header("Idempotency-Key") == "job-1")
       #expect(api.last.json?.keys.sorted() == ["amount", "feature"])
-      try await customer.recordUsage(
-        of: Feature<Metered>("ai_credits"), amount: 2, mode: .observe,
-        occurredAt: Date(timeIntervalSince1970: 1_782_898_200),
-        register: true)
+      let replayed = try await customer.recordUsage(
+        of: Self.credits, amount: 2, idempotencyKey: "job-2", mode: .observe,
+        occurredAt: Date(timeIntervalSince1970: 1_782_898_200), register: true)
+      #expect(replayed.replayed)
       let json = try #require(api.last.json)
       #expect(json["mode"] as? String == "observe")
       #expect(json["occurredAt"] as? String == "2026-07-01T09:30:00.000Z")
       #expect(json["register"] as? Bool == true)
     }
+  }
+
+  @Test func usageKeysAreCheckedBeforeAnyRequest() async throws {
+    let api = FakeAPI()
+    let customer = try api.server().customer("u")
+    let general = ArgumentError(
+      message: "Pass idempotencyKey as 1 to 200 printable ASCII characters.")
+    await #expect(throws: general) {
+      try await customer.recordUsage(of: Self.credits, amount: 1, idempotencyKey: "")
+    }
+    await #expect(throws: general) {
+      try await customer.holdUsage(of: Self.credits, amount: 1, idempotencyKey: " job")
+    }
+    await #expect(throws: general) {
+      try await api.server().customer("u").adjustMeter(Self.credits, by: 1, idempotencyKey: "é")
+    }
+    await #expect(
+      throws: ArgumentError(message: "Pass idempotencyKey as 1 to 193 printable ASCII characters.")
+    ) {
+      try await customer.startHold(
+        of: Self.credits, amount: 1, idempotencyKey: String(repeating: "k", count: 194))
+    }
+    #expect(api.count == 0)
   }
 
   @Test(arguments: [
@@ -40,7 +72,7 @@ import Testing
     }
     let result = try await api.run {
       try await api.server().customer("u").recordUsage(
-        of: Feature<Metered>("ai_credits"), amount: 1)
+        of: Self.credits, amount: 1, idempotencyKey: "k")
     }
     #expect(result.outcome.rawValue == outcome)
     #expect(result.outcome == UsageOutcome(rawValue: outcome))
@@ -59,10 +91,11 @@ import Testing
     let customer = try api.server().customer("u")
     try await api.run {
       let held = try await customer.holdUsage(
-        of: Feature<Metered>("ai_credits"), amount: 10, ttlSeconds: 60)
+        of: Self.credits, amount: 10, idempotencyKey: "job", ttlSeconds: 60)
       #expect(held.holdID == "h_1")
       #expect(api.last.path == "/customers/u/usage/holds")
       #expect(api.last.json?["ttlSeconds"] as? Int == 60)
+      #expect(api.last.header("Idempotency-Key") == "job")
       try await customer.settleUsage(hold: "h_1", amount: 4)
       #expect(api.last.path == "/customers/u/usage/holds/h_1/settle")
       #expect(api.last.json?["amount"] as? Int == 4)
@@ -78,26 +111,157 @@ import Testing
     }
   }
 
-  static let credits = Feature<Metered>("ai_credits")
-
-  static func holdAPI(settle: Reply? = nil, release: Reply? = nil, outcome: String = "held")
-    -> FakeAPI
-  {
+  static func holdAPI(
+    settle: Reply? = nil, release: Reply? = nil, record: Reply? = nil, outcome: String = "held"
+  ) -> FakeAPI {
     FakeAPI { request in
       if request.path.hasSuffix("/settle"), let settle { return settle }
       if request.method == "DELETE", let release { return release }
-      return .json(Fixture.usage(outcome: outcome, holdID: #""h_1""#, amount: 10))
+      if request.path.hasSuffix("/usage"), let record { return record }
+      return .json(
+        Fixture.usage(
+          outcome: request.path.hasSuffix("/settle")
+            ? "settled" : request.method == "DELETE" ? "released" : outcome,
+          holdID: #""h_1""#, amount: 10, expiresAt: #""2026-10-09T01:52:13.000Z""#))
     }
   }
 
-  @Test func withHoldSettlesTheReportedAmountAndAnswersTheWorksResult() async throws {
+  @Test func startHoldAnswersAHandleBeforeAnyWork() async throws {
     let api = Self.holdAPI()
-    let customer = try api.server().customer("u")
+    let hold = try await api.run {
+      try await api.server().customer("u").startHold(
+        of: Self.credits, amount: 10, idempotencyKey: "message-1", ttlSeconds: 120)
+    }
+    #expect(hold.id == "h_1")
+    #expect(hold.amount == 10)
+    #expect(hold.expiresAt == parseInstant("2026-10-09T01:52:13.000Z"))
+    #expect(!hold.isDuplicate)
+    #expect(hold.result.outcome == .held)
+    #expect(api.count == 1)
+    #expect(api.last.header("Idempotency-Key") == "message-1")
+    #expect(api.last.json?["ttlSeconds"] as? Int == 120)
+    let duplicate = try await api.run {
+      try await Self.holdAPI(outcome: "duplicate").server().customer("u").startHold(
+        of: Self.credits, amount: 10, idempotencyKey: "message-1")
+    }
+    #expect(duplicate.isDuplicate)
+  }
+
+  @Test func startHoldRefusesAndReplays() async throws {
+    for outcome in ["refused", "settled", "released", "brand_new"] {
+      let api = FakeAPI { _ in
+        .json(
+          Fixture.usage(
+            outcome: outcome, refusal: outcome == "refused" ? #""not_entitled""# : "null",
+            holdID: #""h_1""#))
+      }
+      let ran = Box(false)
+      do {
+        _ = try await api.run {
+          try await api.server().customer("u").withHold(
+            of: Self.credits, amount: 10, idempotencyKey: "job"
+          ) { _ in
+            ran.with { $0 = true }
+          }
+        }
+        Issue.record("Expected an error for \(outcome)")
+      } catch EntitlerError.usageRefused(let answer) {
+        #expect(outcome == "refused")
+        #expect(answer.refusal == .notEntitled)
+        #expect(EntitlerError.usageRefused(answer).description.contains("not_entitled"))
+      } catch EntitlerError.usageReplayed(let answer) {
+        #expect(outcome != "refused")
+        #expect(answer.outcome.rawValue == outcome)
+        #expect(EntitlerError.usageReplayed(answer).description.contains("already"))
+      }
+      #expect(!ran.get)
+    }
+  }
+
+  @Test func finishSettlesTheReportedAmountOrTheHeldAmount() async throws {
+    for (reported, settled) in [(Int64?(7), 7), (nil, 10), (0, 0)] {
+      let api = Self.holdAPI()
+      try await api.run {
+        let hold = try await api.server().customer("u").startHold(
+          of: Self.credits, amount: 10, idempotencyKey: "job")
+        if let reported { try hold.use(reported) }
+        let result = try await hold.finish()
+        #expect(result.outcome == .settled)
+      }
+      #expect(api.last.path == "/customers/u/usage/holds/h_1/settle")
+      #expect(api.last.json?["amount"] as? Int == settled)
+    }
+  }
+
+  @Test func onlyTheFirstEndingActs() async throws {
+    let api = Self.holdAPI()
+    try await api.run {
+      let hold = try await api.server().customer("u").startHold(
+        of: Self.credits, amount: 10, idempotencyKey: "job")
+      try hold.use(3)
+      let finished = try await hold.finish()
+      let released = try await hold.release()
+      let again = try await hold.finish()
+      #expect(finished == released)
+      #expect(finished == again)
+      _ = try await hold.run { _ in 1 }
+    }
+    #expect(api.count == 2)
+    #expect(api.last.path.hasSuffix("/settle"))
+  }
+
+  @Test func releaseFreesTheHold() async throws {
+    let api = Self.holdAPI()
+    try await api.run {
+      let hold = try await api.server().customer("u").startHold(
+        of: Self.credits, amount: 10, idempotencyKey: "job")
+      let result = try await hold.release()
+      #expect(result.outcome == .released)
+    }
+    #expect(api.last.method == "DELETE")
+    #expect(api.last.path == "/customers/u/usage/holds/h_1")
+  }
+
+  @Test func finishRecordsTheExcessInObserveMode() async throws {
+    let api = Self.holdAPI()
+    let result = try await api.run {
+      let hold = try await api.server().customer("u").startHold(
+        of: Self.credits, amount: 10, idempotencyKey: "job-2")
+      try hold.use(15)
+      return try await hold.finish()
+    }
+    #expect(result.outcome == .settled)
+    let requests = api.requests.get
+    #expect(requests.count == 3)
+    #expect(requests[1].json?["amount"] as? Int == 10)
+    #expect(requests[2].path == "/customers/u/usage")
+    #expect(requests[2].json?["amount"] as? Int == 5)
+    #expect(requests[2].json?["mode"] as? String == "observe")
+    #expect(requests[2].header("Idempotency-Key") == "job-2:excess")
+  }
+
+  @Test func anExpiredHoldIsRecordedWholeUnderTheExcessKey() async throws {
+    let api = Self.holdAPI(settle: .error(409, code: "hold_expired"))
+    let result = try await api.run {
+      try await api.server().customer("u").withHold(
+        of: Self.credits, amount: 10, idempotencyKey: "job-3"
+      ) { hold in
+        try hold.use(6)
+        return "done"
+      }
+    }
+    #expect(result == "done")
+    #expect(api.last.path == "/customers/u/usage")
+    #expect(api.last.json?["amount"] as? Int == 6)
+    #expect(api.last.header("Idempotency-Key") == "job-3:excess")
+  }
+
+  @Test func withHoldAnswersTheWorksResult() async throws {
+    let api = Self.holdAPI()
     let summary = try await api.run {
-      try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job-1") { hold in
-        #expect(hold.holdID == "h_1")
-        #expect(hold.amount == 10)
-        #expect(hold.result.outcome == .held)
+      try await api.server().customer("u").withHold(
+        of: Self.credits, amount: 10, idempotencyKey: "job-1"
+      ) { hold in
         try hold.use(9)
         try hold.use(7)
         return "summary"
@@ -112,90 +276,85 @@ import Testing
     #expect(api.requests.get[0].header("Idempotency-Key") == "job-1")
   }
 
-  @Test func withHoldSettlesTheHeldAmountWhenNothingIsReported() async throws {
-    let api = Self.holdAPI(outcome: "duplicate")
-    _ = try await api.run {
-      try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { _ in 1 }
-    }
-    #expect(api.last.json?["amount"] as? Int == 10)
-  }
-
-  @Test func withHoldRefusesAmountsOutOfRange() async throws {
+  @Test func withHoldChecksItsArguments() async throws {
     let api = Self.holdAPI()
     let customer = try api.server().customer("u")
     await #expect(
       throws: ArgumentError(message: "Pass the amount used as a whole number of 0 or more.")
     ) {
       try await api.run {
-        try await customer.withHold(of: Self.credits, amount: 10) { hold in try hold.use(-1) }
+        try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "a") { hold in
+          try hold.use(-1)
+        }
       }
     }
     #expect(api.last.method == "DELETE")
     await #expect(
-      throws: ArgumentError(message: "Pass idempotencyKey as 1 to 193 printable ASCII characters.")
-    ) {
-      try await customer.withHold(
-        of: Self.credits, amount: 10, idempotencyKey: String(repeating: "k", count: 194)
-      ) { _ in 1 }
-    }
-    await #expect(
       throws: ArgumentError(message: "Pass amount as a whole number from 1 to 9007199254740991.")
     ) {
-      try await customer.withHold(of: Self.credits, amount: 0) { _ in 1 }
+      try await customer.withHold(of: Self.credits, amount: 0, idempotencyKey: "b") { _ in 1 }
     }
   }
 
-  @Test func withHoldRecordsTheExcessInObserveMode() async throws {
-    let api = Self.holdAPI()
-    let customer = try api.server().customer("u")
-    _ = try await api.run {
-      try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job-2") { hold in
-        try hold.use(15)
-      }
-    }
-    let requests = api.requests.get
-    #expect(requests.count == 3)
-    #expect(requests[1].json?["amount"] as? Int == 10)
-    #expect(requests[2].path == "/customers/u/usage")
-    #expect(requests[2].json?["amount"] as? Int == 5)
-    #expect(requests[2].json?["mode"] as? String == "observe")
-    #expect(requests[2].header("Idempotency-Key") == "job-2:excess")
-  }
-
-  @Test func withHoldRecordsEverythingWhenTheHoldExpired() async throws {
-    let api = Self.holdAPI(settle: .error(409, code: "hold_expired"))
-    _ = try await api.run {
-      try await api.server().customer("u").withHold(
-        of: Self.credits, amount: 10, idempotencyKey: "job-3"
-      ) { hold in
-        try hold.use(6)
-      }
-    }
-    #expect(api.last.path == "/customers/u/usage")
-    #expect(api.last.json?["amount"] as? Int == 6)
-    #expect(api.last.header("Idempotency-Key") == "job-3:excess")
-  }
-
-  @Test func withHoldReleasesWhenWorkFails() async throws {
+  @Test func workFailingAfterReportingSettlesTheReportedAmount() async throws {
     struct WorkFailed: Error {}
     let api = Self.holdAPI()
-    let customer = try api.server().customer("u")
     await #expect(throws: WorkFailed.self) {
       try await api.run {
-        try await customer.withHold(of: Self.credits, amount: 10) { _ in throw WorkFailed() }
+        try await api.server().customer("u").withHold(
+          of: Self.credits, amount: 10, idempotencyKey: "job"
+        ) { hold in
+          try hold.use(3)
+          throw WorkFailed()
+        }
+      }
+    }
+    #expect(api.last.path == "/customers/u/usage/holds/h_1/settle")
+    #expect(api.last.json?["amount"] as? Int == 3)
+  }
+
+  @Test func workFailingBeforeReportingReleases() async throws {
+    struct WorkFailed: Error {}
+    let api = Self.holdAPI()
+    await #expect(throws: WorkFailed.self) {
+      try await api.run {
+        try await api.server().customer("u").withHold(
+          of: Self.credits, amount: 10, idempotencyKey: "job"
+        ) { _ in throw WorkFailed() }
       }
     }
     #expect(api.last.method == "DELETE")
     #expect(api.last.path == "/customers/u/usage/holds/h_1")
   }
 
-  @Test func withHoldReleasesWhenCancelled() async throws {
+  @Test func cancellingTheWorkSettlesWhatItReported() async throws {
     let api = Self.holdAPI()
     let customer = try api.server().customer("u")
     let started = Box(false)
     let task = Task {
       try await api.run {
-        try await customer.withHold(of: Self.credits, amount: 10) { _ in
+        try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job") { hold in
+          try hold.use(4)
+          started.with { $0 = true }
+          try await Task.sleep(nanoseconds: 5_000_000_000)
+          return 1
+        }
+      }
+    }
+    while !started.get { try await Task.sleep(nanoseconds: 1_000_000) }
+    task.cancel()
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(api.last.path.hasSuffix("/settle"))
+    #expect(api.last.json?["amount"] as? Int == 4)
+  }
+
+  @Test func cancellingBeforeAnyReportReleases() async throws {
+    let api = Self.holdAPI()
+    let customer = try api.server().customer("u")
+    let started = Box(false)
+    let task = Task {
+      try await api.run {
+        try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job") { _ in
           started.with { $0 = true }
           try await Task.sleep(nanoseconds: 5_000_000_000)
           return 1
@@ -208,50 +367,48 @@ import Testing
     #expect(api.last.method == "DELETE")
   }
 
-  @Test func failedReleaseGoesToOnError() async throws {
+  @Test func disposalFailuresGoToOnError() async throws {
     struct WorkFailed: Error {}
-    let errors = Box(0)
-    let api = Self.holdAPI(release: .error(404, code: "not_found"))
-    let customer = try api.server { $0.onError = { _ in errors.with { $0 += 1 } } }.customer("u")
-    await #expect(throws: WorkFailed.self) {
-      try await api.run {
-        try await customer.withHold(of: Self.credits, amount: 10) { _ in throw WorkFailed() }
-      }
-    }
-    #expect(errors.get == 1)
-  }
-
-  @Test(arguments: ["refused", "settled", "released"])
-  func withHoldNeverRunsWorkWithoutAnOpenHold(outcome: String) async throws {
-    let api = FakeAPI { _ in
-      .json(
-        Fixture.usage(
-          outcome: outcome, refusal: outcome == "refused" ? #""not_entitled""# : "null",
-          holdID: #""h_1""#))
-    }
-    let ran = Box(false)
-    do {
-      _ = try await api.run {
-        try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { _ in
-          ran.with { $0 = true }
-          return 1
+    for reported in [Int64?.none, 2] {
+      let errors = Box<[any Error]>([])
+      let api = Self.holdAPI(
+        settle: .error(400, code: "invalid_body"), release: .error(404, code: "not_found"))
+      let customer = try api.server { $0.onError = { error in errors.with { $0.append(error) } } }
+        .customer("u")
+      await #expect(throws: WorkFailed.self) {
+        try await api.run {
+          try await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "job") {
+            hold in
+            if let reported { try hold.use(reported) }
+            throw WorkFailed()
+          }
         }
       }
-      Issue.record("Expected a refusal")
-    } catch EntitlerError.usageRefused(let answer) {
-      #expect(answer.outcome.rawValue == outcome)
-      #expect(
-        EntitlerError.usageRefused(answer).description.contains(
-          outcome == "refused" ? "not_entitled" : outcome))
+      let error = try #require(errors.get.first)
+      if reported == nil {
+        guard case EntitlerError.api(let api) = error else {
+          Issue.record("Expected the release's own error")
+          continue
+        }
+        #expect(api.code == .notFound)
+      } else {
+        guard case EntitlerError.usageSettlement(let failure) = error else {
+          Issue.record("Expected a settlement error")
+          continue
+        }
+        #expect(failure.amount == 2)
+        #expect(failure.result == nil)
+      }
     }
-    #expect(!ran.get)
   }
 
   @Test func failedSettlementCarriesTheHoldAndTheResult() async throws {
     let api = Self.holdAPI(settle: .error(400, code: "invalid_body"))
     do {
       _ = try await api.run {
-        try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { hold in
+        try await api.server().customer("u").withHold(
+          of: Self.credits, amount: 10, idempotencyKey: "job"
+        ) { hold in
           try hold.use(12)
           return "output"
         }
@@ -267,22 +424,20 @@ import Testing
     }
   }
 
-  @Test func failedExcessCarriesTheExcess() async throws {
-    let api = FakeAPI { request in
-      request.path == "/customers/u/usage"
-        ? .error(400, code: "invalid_body")
-        : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#, amount: 10))
-    }
+  @Test func finishFailingCarriesNoResult() async throws {
+    let api = Self.holdAPI(record: .error(400, code: "invalid_body"))
     do {
-      _ = try await api.run {
-        try await api.server().customer("u").withHold(of: Self.credits, amount: 10) { hold in
-          try hold.use(13)
-        }
+      try await api.run {
+        let hold = try await api.server().customer("u").startHold(
+          of: Self.credits, amount: 10, idempotencyKey: "job")
+        try hold.use(13)
+        try await hold.finish()
       }
       Issue.record("Expected an error")
     } catch EntitlerError.usageSettlement(let error) {
       #expect(error.amount == 0)
       #expect(error.excess == 3)
+      #expect(error.result == nil)
     }
   }
 
@@ -292,7 +447,8 @@ import Testing
     await #expect(
       throws: ArgumentError(message: "Pass amount as a whole number from 1 to 9007199254740991.")
     ) {
-      try await customer.recordUsage(of: Self.credits, amount: 9_007_199_254_740_992)
+      try await customer.recordUsage(
+        of: Self.credits, amount: 9_007_199_254_740_992, idempotencyKey: "k")
     }
     await #expect(
       throws: ArgumentError(message: "Pass amount as a whole number from 0 to the held amount.")
@@ -343,78 +499,6 @@ import Testing
     }
   }
 
-  @Test func batchesSplitAtFiveHundredAndKeepInputOrder() async throws {
-    let api = FakeAPI { request in
-      let events = (request.json?["events"] as? [[String: Any]]) ?? []
-      let results = events.indices.map {
-        #"{"index":\#($0),"outcome":"recorded","id":"u_\#($0)","late":false,"error":null}"#
-      }
-      return .json(
-        #"{"results":[\#(results.joined(separator: ","))],"recorded":\#(events.count),"duplicates":0,"errors":0}"#
-      )
-    }
-    let events = (0..<1_001).map {
-      UsageBatchEvent(
-        customer: "c\($0)", feature: Feature<Metered>("ai_credits"), amount: 1,
-        idempotencyKey: $0 == 0 ? "first" : nil)
-    }
-    let result = try await api.run {
-      try await api.server().recordUsageBatch(events, register: true)
-    }
-    #expect(api.requests.get.map { ($0.json?["events"] as? [Any])?.count } == [500, 500, 1])
-    #expect(result.results.count == 1_001)
-    #expect(result.results.map(\.index) == Array(0..<1_001))
-    #expect(result.recorded == 1_001)
-    let first = try #require(api.requests.get.first?.json)
-    #expect(first["register"] as? Bool == true)
-    let event = try #require((first["events"] as? [[String: Any]])?.first)
-    #expect(event["idempotencyKey"] as? String == "first")
-    #expect(event["customer"] as? String == "c0")
-    #expect(api.last.path == "/usage/events")
-  }
-
-  @Test func batchesForceRevalidationForTheirCustomers() async throws {
-    let api = FakeAPI { request in
-      request.method == "GET"
-        ? .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
-        : .json(#"{"results":[],"recorded":0,"duplicates":0,"errors":0}"#)
-    }
-    let server = try api.server()
-    try await api.run {
-      _ = try await server.customer("u").check("sso")
-      api.advance(1)
-      _ = try await server.recordUsageBatch([
-        UsageBatchEvent(customer: "u", feature: Feature<Metered>("ai_credits"))
-      ])
-      _ = try await server.customer("u").check("sso")
-    }
-    #expect(api.count == 3)
-  }
-
-  @Test func batchErrorsDecode() async throws {
-    let api = FakeAPI { _ in
-      .json(
-        #"{"results":[{"index":0,"outcome":"error","id":null,"late":false,"error":{"code":"not_metered","message":"No."}},{"index":1,"outcome":"duplicate","id":"u_1","late":true,"error":null}],"recorded":0,"duplicates":1,"errors":1}"#
-      )
-    }
-    let result = try await api.run {
-      try await api.server().recordUsageBatch([
-        UsageBatchEvent(customer: "a", feature: Feature<Metered>("sso")),
-        UsageBatchEvent(customer: "b", feature: Feature<Metered>("ai_credits")),
-      ])
-    }
-    #expect(result.results[0].error?.code == .notMetered)
-    #expect(result.results[1].outcome == .duplicate)
-    #expect(result.duplicates == 1)
-    #expect(api.last.json?["register"] == nil)
-    await #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer."))
-    {
-      try await api.server().recordUsageBatch([
-        UsageBatchEvent(customer: " ", feature: Feature<Metered>("f"))
-      ])
-    }
-  }
-
   @Test func snapshotsAreMinted() async throws {
     let api = FakeAPI { _ in
       .json(#"{"token":"a.b.c","expiresAt":"2026-10-10T00:00:00Z","keyId":"k1"}"#, status: 201)
@@ -424,258 +508,178 @@ import Testing
       let snapshot = try await customer.snapshot()
       #expect(snapshot.keyID == "k1")
       #expect(api.last.body.map { String(decoding: $0, as: UTF8.self) } == "{}")
+      #expect(api.last.header("Idempotency-Key")?.count == 36)
       _ = try await customer.snapshot(ttlSeconds: 600)
       #expect(api.last.json?["ttlSeconds"] as? Int == 600)
     }
   }
 }
 
-@Suite struct ServerCustomerTests {
-  @Test func registerSendsOnlyDetailsGivenAndTheVisitor() async throws {
-    let api = FakeAPI { _ in
-      .json(
-        #"{"id":"c","externalId":"u","environmentId":"e","createdAt":"2026-10-09T01:47:13Z","created":false}"#
-      )
+@Suite struct BatchTests {
+  static func answering(_ request: Recorded) -> Reply {
+    let events = (request.json?["events"] as? [[String: Any]]) ?? []
+    let results = events.indices.map {
+      #"{"index":\#($0),"outcome":"recorded","id":"u_\#($0)","late":false,"error":null}"#
     }
-    let customer = try api.server().customer("u")
-    try await api.run {
-      try await customer.register()
-      #expect(api.last.method == "PUT")
-      #expect(api.last.body == nil || api.last.body?.isEmpty == true)
-      #expect(api.last.header("Content-Type") == nil)
-      #expect(api.last.header("Idempotency-Key") != nil)
-      try await customer.register(
-        name: "Ada", metadata: ["team": "a"], visitor: "abcdefghijklmnopq")
-      #expect(api.last.json?.keys.sorted() == ["metadata", "name"])
-      #expect(api.last.header("Entitler-Visitor") == "abcdefghijklmnopq")
+    return .json(
+      #"{"results":[\#(results.joined(separator: ","))],"recorded":\#(events.count),"duplicates":0,"errors":0}"#
+    )
+  }
+
+  static func events(_ count: Int, from start: Int = 0) -> [UsageBatchEvent] {
+    (start..<start + count).map {
+      UsageBatchEvent(
+        customer: "c\($0)", feature: Feature<Metered>("ai_credits"), amount: 1,
+        idempotencyKey: "e\($0)")
     }
   }
 
-  @Test func detailsUpdateDeleteTokenAndTrack() async throws {
-    let api = FakeAPI { request in
-      switch (request.method, request.path) {
-      case ("GET", _): .json(Fixture.detail)
-      case ("POST", _):
-        .json(
-          #"{"token":"tok","customer":"u","scopes":["entitlements:read","future:scope"],"expiresAt":"2026-10-09T02:47:13Z"}"#
-        )
-      case ("PUT", _):
-        .json(
-          #"{"customer":"u","track":{"id":"t2","name":"Beta"},"source":"server","previousTrackId":"t1"}"#
-        )
-      default: .json(Fixture.summary)
-      }
+  @Test func batchesSplitAtFiveHundredWithKeysDerivedFromTheirEvents() async throws {
+    let api = FakeAPI(Self.answering)
+    let events = Self.events(1_001)
+    let result = try await api.run {
+      try await api.server().recordUsageBatch(events, register: true)
     }
-    let customer = try api.server().customer("u")
-    try await api.run {
-      let detail = try await customer.details(cursor: "c1")
-      #expect(api.last.query == "cursor=c1")
-      #expect(detail.subscription?.pending?.type == .cancel)
-      #expect(detail.subscription?.purchase.channel?.provider == .stripe)
-      #expect(detail.banked["ai_credits"] == 5)
-      #expect(detail.selfServe == true)
-      #expect(detail.customer.metadata["team"] == "a")
-      let updated = try await customer.update(
-        email: "new@example.com", metadata: ["team": nil, "role": "admin"])
-      #expect(updated.externalID == "user_1")
-      #expect(api.last.method == "PATCH")
-      let metadata = try #require(api.last.json?["metadata"] as? [String: Any])
-      #expect(metadata["team"] is NSNull)
-      #expect(metadata["role"] as? String == "admin")
-      #expect(api.last.json?["name"] == nil)
-      try await customer.delete(erase: true)
-      #expect(api.last.method == "DELETE")
-      #expect(api.last.query == "erase=true")
-      try await customer.delete()
-      #expect(api.last.query == nil)
-      let token = try await customer.token(scopes: [.entitlementsRead], ttlSeconds: 600)
-      #expect(token.scopes == [.entitlementsRead])
-      #expect(api.last.json?["scopes"] as? [String] == ["entitlements:read"])
-      _ = try await customer.token()
-      #expect(api.last.body.map { String(decoding: $0, as: UTF8.self) } == "{}")
-      let track = try await customer.setTrack("t2")
-      #expect(track.previousTrackID == "t1")
-      #expect(api.last.json?["trackId"] as? String == "t2")
-      try await customer.setTrack(nil)
-      #expect(api.last.body.map { String(decoding: $0, as: UTF8.self) } == #"{"trackId":null}"#)
-    }
+    let requests = api.requests.get
+    #expect(requests.map { ($0.json?["events"] as? [Any])?.count } == [500, 500, 1])
+    #expect(result.results.count == 1_001)
+    #expect(result.results.map(\.index) == Array(0..<1_001))
+    #expect(result.recorded == 1_001)
+    let first = try #require(requests.first?.json)
+    #expect(first["register"] as? Bool == true)
+    let event = try #require((first["events"] as? [[String: Any]])?.first)
+    #expect(event["idempotencyKey"] as? String == "e0")
+    #expect(event["customer"] as? String == "c0")
+    #expect(requests.last?.path == "/usage/events")
+    #expect(
+      requests.last?.header("Idempotency-Key")
+        == "batch:" + sha256(#"["entitler-batch-v1",true,[["c1000","ai_credits",1,null,"e1000"]]]"#)
+    )
+    let keys = requests.compactMap { $0.header("Idempotency-Key") }
+    #expect(Set(keys).count == 3)
+    #expect(keys.allSatisfy { $0.hasPrefix("batch:") && $0.count == 70 })
   }
 
-  @Test func selfServeBillingSendsSelfServeTrue() async throws {
-    let api = FakeAPI { request in
-      request.path.hasSuffix("checkout") || request.path.hasSuffix("billing-portal")
-        ? .json(#"{"provider":"stripe","url":"https://checkout.test/s"}"#) : .json(Fixture.detail)
-    }
-    let customer = try api.server().customer("u")
+  @Test func theSameEventsSendTheSameKeyAndARerunANewOne() async throws {
+    let api = FakeAPI(Self.answering)
+    let server = try api.server()
+    let at = Date(timeIntervalSince1970: 1_782_898_200)
+    let events = [
+      UsageBatchEvent(
+        customer: "a\"b", feature: Feature<Metered>("ai_credits"), amount: 2, occurredAt: at,
+        idempotencyKey: "k1"),
+      UsageBatchEvent(
+        customer: "c", feature: Feature<Metered>("ai_credits"), amount: 3, idempotencyKey: "k2"),
+    ]
     try await api.run {
-      try await customer.subscribe(to: "pro", period: "yearly")
-      #expect(api.last.path == "/customers/u/subscription")
-      #expect(api.last.json?["plan"] as? String == "pro")
-      #expect(api.last.json?["selfServe"] as? Bool == true)
-      #expect(api.last.json?["override"] == nil)
-      try await customer.subscribe(
-        to: .sku(SKU(connector: "apple", ids: ["productId": "pro"])), when: .end)
-      #expect((api.last.json?["sku"] as? [String: Any])?["connector"] as? String == "apple")
-      #expect(api.last.json?["when"] as? String == "end")
-      let page = try await customer.checkout(
-        "pro", successURL: URL(string: "https://app.test/ok")!,
-        cancelURL: URL(string: "https://app.test/no")!)
-      #expect(page.url.absoluteString == "https://checkout.test/s")
-      #expect(api.last.json?["successUrl"] as? String == "https://app.test/ok")
-      #expect(api.last.json?["selfServe"] as? Bool == true)
-      try await customer.cancel(when: .now, product: "app")
-      #expect(api.last.query == "product=app&when=now")
-      try await customer.cancel()
-      #expect(api.last.query == nil)
-      try await customer.undoPendingChange(product: "app")
-      #expect(api.last.path == "/customers/u/subscription/pending")
-      try await customer.addAddOn("sso_addon", quantity: 2, replaces: "old")
-      #expect(api.last.json?["quantity"] as? Int == 2)
-      #expect(api.last.json?["replaces"] as? String == "old")
-      #expect(api.last.json?["selfServe"] as? Bool == true)
-      try await customer.setAddOnQuantity("sso_addon", to: 3)
-      #expect(api.last.method == "PATCH")
-      #expect(api.last.json?["selfServe"] as? Bool == true)
-      try await customer.removeAddOn("sso_addon")
-      #expect(api.last.path == "/customers/u/subscription/add-ons/sso_addon")
-      try await customer.undoAddOnChange("sso_addon")
-      #expect(api.last.path == "/customers/u/subscription/add-ons/sso_addon/pending")
-      _ = try await customer.billingPortal(returnURL: URL(string: "https://app.test/account")!)
-      #expect(api.last.json?["returnUrl"] as? String == "https://app.test/account")
-      await #expect(throws: ArgumentError(message: "Name the plan by its id or its key.")) {
-        try await customer.subscribe(to: " ")
-      }
+      _ = try await server.recordUsageBatch(events)
+      _ = try await server.recordUsageBatch(events)
+      _ = try await server.recordUsageBatch([events[1]])
     }
+    let keys = api.requests.get.map { $0.header("Idempotency-Key") }
+    #expect(keys[0] == keys[1])
+    #expect(keys[2] != keys[0])
+    #expect(
+      keys[0]
+        == "batch:"
+        + sha256(
+          #"["entitler-batch-v1",false,[["a\"b","ai_credits",2,"2026-07-01T09:30:00.000Z","k1"],["c","ai_credits",3,null,"k2"]]]"#
+        ))
   }
 
-  @Test func vendorActionsSendSelfServeFalse() async throws {
-    let api = FakeAPI { request in
-      if request.path.contains("/meters/") || request.path.contains("/usage/") {
-        return .json(Fixture.usage(outcome: "adjusted"))
-      }
-      if request.path.hasSuffix("checkout") {
-        return .json(#"{"provider":"stripe","url":"https://checkout.test/s"}"#)
-      }
-      return .json(Fixture.detail)
+  @Test func eventsTheSDKRefusesAreAnsweredWithoutBeingSent() async throws {
+    let api = FakeAPI(Self.answering)
+    let events = [
+      UsageBatchEvent(
+        customer: " ", feature: Feature<Metered>("f"), amount: 1, idempotencyKey: "a"),
+      UsageBatchEvent(customer: "c", feature: Feature<Metered>(""), amount: 1, idempotencyKey: "b"),
+      UsageBatchEvent(
+        customer: "c", feature: Feature<Metered>("f"), amount: 0, idempotencyKey: "c"),
+      UsageBatchEvent(customer: "c", feature: Feature<Metered>("f"), amount: 1, idempotencyKey: ""),
+      UsageBatchEvent(
+        customer: "c", feature: Feature<Metered>("f"), amount: 1, idempotencyKey: "ok"),
+    ]
+    let result = try await api.run { try await api.server().recordUsageBatch(events) }
+    #expect(api.count == 1)
+    #expect((api.last.json?["events"] as? [Any])?.count == 1)
+    #expect(result.results.map(\.outcome) == [.error, .error, .error, .error, .recorded])
+    #expect(result.results[4].index == 4)
+    #expect(
+      result.results.prefix(4).map { $0.error?.code } == [
+        .invalidBody, .invalidBody, .invalidAmount, .invalidIdempotencyKey,
+      ])
+    #expect(result.results[0].error?.message == "Provide the id your app uses for the customer.")
+    #expect(result.results[1].error?.message == "Name the feature by its key.")
+    #expect(
+      result.results[2].error?.message
+        == "Pass amount as a whole number from 1 to 9007199254740991.")
+    #expect(
+      result.results[3].error?.message
+        == "Pass idempotencyKey as 1 to 200 printable ASCII characters.")
+    #expect(result.errors == 4)
+    let nothing = try await api.run {
+      try await api.server().recordUsageBatch(Array(events.prefix(1)))
     }
-    let vendor = try api.server().customer("u").vendor
-    try await api.run {
-      try await vendor.subscribe(to: "team")
-      #expect(api.last.json?["selfServe"] as? Bool == false)
-      try await vendor.override(to: "team", period: "monthly")
-      #expect(api.last.json?["override"] as? Bool == true)
-      #expect(api.last.json?["selfServe"] as? Bool == false)
-      try await vendor.undoOverride(product: "app")
-      #expect(api.last.path == "/customers/u/subscription/override")
-      #expect(api.last.query == "product=app")
-      _ = try await vendor.checkout(
-        "team", successURL: URL(string: "https://a.test")!,
-        cancelURL: URL(string: "https://b.test")!, connection: "c1")
-      #expect(api.last.json?["selfServe"] as? Bool == false)
-      #expect(api.last.json?["connection"] as? String == "c1")
-      try await vendor.addAddOn("sso_addon")
-      #expect(api.last.json?["selfServe"] as? Bool == false)
-      try await vendor.setAddOnQuantity("sso_addon", to: 2)
-      #expect(api.last.json?["selfServe"] as? Bool == false)
-      try await vendor.grant(Feature<OnOff>("sso"), days: 30, reason: "Trial")
-      #expect(api.last.json?.keys.sorted() == ["days", "feature", "reason"])
-      try await vendor.grant("seats", value: .amount(5))
-      #expect(api.last.json?["value"] as? String == "5")
-      try await vendor.grant("credits", value: .unlimited)
-      #expect(api.last.json?["value"] as? String == "unlimited")
-      try await vendor.revokeGrant("g_1")
-      #expect(api.last.path == "/customers/u/grants/g_1")
-      let set = try await vendor.setMeter(Feature<Metered>("ai_credits"), to: 40)
-      #expect(set.outcome == .adjusted)
-      #expect(api.last.method == "PUT")
-      #expect(api.last.json?["used"] as? Int == 40)
-      try await vendor.cancelUsage("u_1")
-      #expect(api.last.path == "/customers/u/usage/u_1")
-      await #expect(throws: ArgumentError(message: "Provide the id of the grant.")) {
-        try await vendor.revokeGrant("")
-      }
-      await #expect(throws: ArgumentError(message: "Provide the id of the usage report.")) {
-        try await vendor.cancelUsage("")
-      }
-    }
+    #expect(api.count == 1)
+    #expect(nothing.results.count == 1)
   }
 
-  @Test func billingAndProvidersDecode() async throws {
+  @Test func aFailedRequestAnswersItsEventsAndTheNextStillGoes() async throws {
+    let calls = Box(0)
     let api = FakeAPI { request in
-      request.path.hasSuffix("billing")
-        ? .json(
-          #"{"provider":"stripe","status":"past_due","sku":{"period":"monthly","connector":"stripe","ids":{"price":"p"},"price":null},"items":1,"drift":{"billedPlan":"pro","heldPlan":null,"observedAt":"2026-10-09T01:47:13Z"},"products":[{"product":"app","status":"active","sku":null,"items":1,"drift":null}]}"#
-        )
-        : .json(
-          #"{"connections":[{"connection":{"id":"c","name":"Stripe","provider":"stripe"},"readAt":"2026-10-09T01:47:13Z","state":{"subscriptions":[{"id":"s","status":"active","billing":true,"period":{"startsAt":"2026-10-01T00:00:00Z","endsAt":"2026-11-01T00:00:00Z"},"trialEndsAt":null,"cancelsAt":null,"items":[{"id":"i","ids":{},"quantity":1,"sale":{"plan":"pro","version":1,"period":"monthly","kind":"plan","product":"app"}}]}],"payments":[{"id":"p","ids":{},"quantity":1,"amount":{"value":100,"currency":"aud"},"status":"partially_refunded","paidAt":"2026-10-01T00:00:00Z","sale":null}]}}],"alerts":[{"id":"a","rule":"held_plan_differs","title":"T","message":"M","facts":{"customer":"u","connection":"c","provider":"google","refusal":"sandbox_builds_turned_off","planId":"p1"},"customer":{"externalId":"u","name":"Ada"},"connection":{"id":"c","name":"Stripe","provider":"stripe"},"openedAt":"2026-10-01T00:00:00Z","seenAt":"2026-10-01T00:00:00Z","resolvedAt":null,"resolvedBy":"person"}]}"#
-        )
+      let call = calls.with {
+        $0 += 1
+        return $0
+      }
+      return call == 1 ? .failure(.cannotConnectToHost) : Self.answering(request)
     }
-    let customer = try api.server().customer("u")
-    try await api.run {
-      let billing = try await customer.billing()
-      #expect(billing.status == .pastDue)
-      #expect(billing.products?.first?.status == .active)
-      let providers = try await customer.providers()
-      #expect(providers.alerts.first?.rule == .heldPlanDiffers)
-      #expect(providers.alerts.first?.facts.refusal == .sandboxBuildsTurnedOff)
-      #expect(providers.alerts.first?.facts.planID == "p1")
-      #expect(providers.connections.first?.state.payments.first?.status == .partiallyRefunded)
-      #expect(providers.linked == nil)
+    let result = try await api.run {
+      try await api.server { $0.maxRetries = 0 }.recordUsageBatch(Self.events(501))
     }
+    #expect(api.count == 2)
+    #expect(result.results.prefix(500).allSatisfy { $0.outcome == .error })
+    #expect(result.results[0].error?.code == .connectionFailed)
+    #expect(result.results[0].idempotencyKey == "e0")
+    #expect(result.results[500].outcome == .recorded)
   }
 
-  @Test func customersListAndCreate() async throws {
+  @Test func batchesForceRevalidationForTheirCustomers() async throws {
     let api = FakeAPI { request in
-      if request.method == "POST" { return .json(Fixture.detail, status: 201) }
-      return request.query?.contains("cursor=n2") == true
-        ? .json(#"{"items":[\#(Fixture.summary)],"next":null,"used":2,"limit":"unlimited"}"#)
-        : .json(#"{"items":[\#(Fixture.summary)],"next":"n2","used":2,"limit":100}"#)
+      request.method == "GET"
+        ? .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+        : Self.answering(request)
     }
     let server = try api.server()
     try await api.run {
-      var count = 0
-      for try await customer in server.customers.list(query: "acme corp", includeTest: true) {
-        #expect(customer.kind == .default)
-        count += 1
-      }
-      #expect(count == 2)
-      #expect(api.requests.get[0].query == "q=acme%20corp&includeTest=true")
-      #expect(api.requests.get[1].query == "q=acme%20corp&includeTest=true&cursor=n2")
-      for try await _ in server.customers.list(cohort: "pro:1", track: "t1") { break }
-      #expect(api.last.query == "cohort=pro%3A1&track=t1")
-      let created = try await server.customers.create(
-        id: "new_1", name: "Ada", plan: "pro", idempotencyKey: "create-1")
-      #expect(created.customer.name == "Ada")
-      #expect(api.last.json?["externalId"] as? String == "new_1")
-      #expect(api.last.json?.keys.sorted() == ["externalId", "name", "plan"])
-      #expect(api.last.header("Idempotency-Key") == "create-1")
+      _ = try await server.customer("u").check("sso")
+      api.advance(1)
+      _ = try await server.recordUsageBatch([
+        UsageBatchEvent(
+          customer: "u", feature: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
+      ])
+      _ = try await server.customer("u").check("sso")
     }
+    #expect(api.count == 3)
   }
 
-  @Test func customerPlansDecode() async throws {
+  @Test func batchErrorsAndReplaysDecode() async throws {
     let api = FakeAPI { _ in
       .json(
-        #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","held":[{"plan":{"id":"p","key":"free","name":"Free","kind":"plan"},"product":{"key":"app","name":"App"},"version":1,"byDefault":true}],"options":[{"plan":{"id":"p2","key":"pro","name":"Pro","kind":"plan"},"product":{"key":"app","name":"App"},"move":"move","from":{"id":"p","key":"free","name":"Free"},"direction":"up","mode":"self-serve","selfServe":true,"disabledReason":null,"when":"now","impact":[{"kind":"Gains","text":"SSO"}],"skus":[]}],\#(Fixture.context)}"#
-      )
+        #"{"results":[{"index":0,"outcome":"error","id":null,"late":false,"error":{"code":"not_metered","message":"No."}},{"index":1,"outcome":"duplicate","id":"u_1","late":true,"error":null}],"recorded":0,"duplicates":1,"errors":1}"#,
+        headers: ["Idempotent-Replayed": "true"])
     }
-    let space = try await api.run { try await api.server().customer("u").plans() }
-    #expect(space.held.first?.byDefault == true)
-    let option = try #require(space.options.first)
-    #expect(option.mode == .selfServe)
-    #expect(option.direction == .up)
-    #expect(option.impact.first?.kind == .gains)
-    #expect(option.plan.kind == .plan)
-  }
-
-  @Test func entitlementsGetAndHas() async throws {
-    let api = FakeAPI { _ in .json(Fixture.entitlements) }
-    let entitlements = try await api.run { try await api.server().customer("u").entitlements() }
-    #expect(entitlements.has(Feature<OnOff>("export_pdf")))
-    #expect(!entitlements.has(Feature<FeatureGroup>("collaboration", includes: ["team_seats"])))
-    #expect(!entitlements.has("missing"))
-    #expect(entitlements[Feature<Metered>("ai_credits")]?.remaining == .unlimited)
-    #expect(entitlements["collaboration"]?.sources.first?.features == ["team_seats"])
-    #expect(entitlements["missing"] == nil)
-    #expect(entitlements.items.count == 3)
+    let result = try await api.run {
+      try await api.server().recordUsageBatch([
+        UsageBatchEvent(
+          customer: "a", feature: Feature<Metered>("sso"), amount: 1, idempotencyKey: "x"),
+        UsageBatchEvent(
+          customer: "b", feature: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "y"),
+      ])
+    }
+    #expect(result.results[0].error?.code == .notMetered)
+    #expect(result.results[1].outcome == .duplicate)
+    #expect(result.results[1].replayed)
+    #expect(result.duplicates == 1)
+    #expect(api.last.json?["register"] == nil)
   }
 }

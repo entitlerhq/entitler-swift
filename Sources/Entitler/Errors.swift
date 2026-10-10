@@ -6,15 +6,15 @@ import Foundation
 ///
 /// ```swift
 /// do {
-///   try await customer.recordUsage(of: Features.aiCredits, amount: 3)
+///   try await customer.recordUsage(of: Features.aiCredits, amount: 3, idempotencyKey: job.id)
 /// } catch EntitlerError.api(let error) where error.code == .customerNotFound {
 ///   try await customer.register()
 /// }
 /// ```
 ///
-/// Cancelling the task surfaces `CancellationError`, and an invalid argument surfaces
-/// ``ArgumentError``; neither is an `EntitlerError`. No error holds a credential, a request or a
-/// request's headers.
+/// Cancelling the task surfaces `CancellationError`, an invalid argument ``ArgumentError``, and a
+/// closed client ``ClientClosedError``; none is an `EntitlerError`. No error holds a credential,
+/// a request or a request's headers.
 public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConvertible {
   /// The API answered with a status other than 2xx, or with a 2xx answer this SDK cannot read.
   case api(APIError)
@@ -26,9 +26,15 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   case token(TokenError)
   /// An offline snapshot failed verification.
   case snapshot(SnapshotError)
-  /// `withHold(of:amount:)` was refused its hold, or its key replayed a finished one.
+  /// ``Customer/startHold(of:amount:idempotencyKey:ttlSeconds:timeout:)`` or `withHold` was
+  /// refused: no allowance remains. The answer says why and lists ``UsageResult/upgrades``.
   case usageRefused(UsageResult)
-  /// `withHold(of:amount:)` ran its work, then failed to settle the hold or record the excess.
+  /// ``Customer/startHold(of:amount:idempotencyKey:ttlSeconds:timeout:)`` or `withHold` was given
+  /// the key of a hold already settled, released or expired: the work it stands for already
+  /// happened, so show that work's result, never an upgrade prompt.
+  case usageReplayed(UsageResult)
+  /// ``Hold/finish()``, or `withHold` after its work succeeded, failed to settle the hold or to
+  /// record the excess.
   case usageSettlement(UsageSettlementError)
 
   /// The message of the error this case carries.
@@ -44,17 +50,27 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .snapshot(let error): error.message
     case .usageRefused(let answer):
       "Entitler refused the hold on \(answer.feature) (\(answer.refusal?.rawValue ?? answer.outcome.rawValue))."
+    case .usageReplayed(let answer):
+      "This key's hold on \(answer.feature) was already \(answer.outcome.rawValue), so its work already happened."
     case .usageSettlement(let error): error.message
     }
   }
 
-  var isUnreachable: Bool {
+  /// True when Entitler could not be reached: no answer, a timeout, a failing token provider, a
+  /// `429`, a `5xx` or an answer this SDK cannot read. An offline-capable app falls back to its
+  /// snapshot then.
+  public var isUnreachable: Bool {
     switch self {
-    case .connection, .timeout: true
+    case .connection, .timeout, .token: true
     case .api(let error):
       error.status == 429 || error.status >= 500 || error.code == .invalidResponse
     default: false
     }
+  }
+
+  var isTokenError: Bool {
+    if case .token = self { return true }
+    return false
   }
 
   var apiError: APIError? {
@@ -63,9 +79,11 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   }
 }
 
-/// `withHold(of:amount:)` ran its work, then failed to settle the hold or record the excess.
+/// ``Hold/finish()``, or `withHold` after its work succeeded, failed to settle the hold or to
+/// record the excess.
 ///
-/// Keep ``result``, and settle the hold with ``holdID`` and ``amount`` before it expires.
+/// Keep the work's output, settle the hold with ``holdID`` and ``amount`` before it expires, and
+/// record ``excess`` in observe mode under the hold's key plus `:excess`.
 public struct UsageSettlementError: Error, Sendable, LocalizedError, CustomStringConvertible {
   /// The hold that is still open.
   public let holdID: String
@@ -75,8 +93,8 @@ public struct UsageSettlementError: Error, Sendable, LocalizedError, CustomStrin
   public let excess: Int64?
   /// The failure.
   public let underlyingError: any Error
-  /// The work's result.
-  public let result: any Sendable
+  /// The work's result, when `withHold` ran it.
+  public internal(set) var result: (any Sendable)?
 
   /// What went wrong.
   public var message: String {
@@ -96,7 +114,7 @@ public struct APIError: Error, Sendable, LocalizedError, CustomStringConvertible
   public let status: Int
   /// The error code from the answer, or ``ErrorCode/httpError`` when it had none.
   public let code: ErrorCode
-  /// The message from the answer, fit to show a person.
+  /// The message from the answer, written for the developer rather than for end users.
   public let message: String
   /// The `x-request-id` header, for Entitler's support.
   public let requestID: String?
@@ -204,6 +222,21 @@ public struct ArgumentError: Error, Sendable, Hashable, LocalizedError, CustomSt
   public var description: String { message }
 }
 
+/// A call on a client after ``EntitlerServer/close()`` or ``EntitlerClient/close()``.
+///
+/// Create a new client: an in-app app creates one for each signed-in person.
+public struct ClientClosedError: Error, Sendable, Hashable, LocalizedError, CustomStringConvertible
+{
+  /// What to do instead.
+  public let message = "This Entitler client is closed. Create a new one."
+
+  /// What to do instead.
+  public var errorDescription: String? { message }
+
+  /// What to do instead.
+  public var description: String { message }
+}
+
 /// The code of an ``APIError``, extensible like `Notification.Name`: an unknown code is kept as it is.
 public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomStringConvertible {
   /// The code as the API sends it, such as `customer_not_found`.
@@ -221,6 +254,8 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
   public static let alreadyConnected = ErrorCode(rawValue: "already_connected")
   /// The credential cannot read at another instant.
   public static let asOfNotAllowed = ErrorCode(rawValue: "as_of_not_allowed")
+  /// A Stripe subscription already bills the product a store SKU names.
+  public static let billedElsewhere = ErrorCode(rawValue: "billed_elsewhere")
   /// The request body is too large.
   public static let bodyTooLarge = ErrorCode(rawValue: "body_too_large")
   /// The browser origin is not allowed for the key.
@@ -231,6 +266,8 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
   public static let invalidResponse = ErrorCode(rawValue: "invalid_response")
   /// The SDK's own code for a batch request that took longer than its timeout.
   public static let timedOut = ErrorCode(rawValue: "timed_out")
+  /// The organisation's plan lacks a capability, such as the customer portal or `as_of`; the message names it.
+  public static let capabilityRequired = ErrorCode(rawValue: "capability_required")
   /// A cap, such as live grants per customer, is reached.
   public static let capReached = ErrorCode(rawValue: "cap_reached")
   /// A carried-forward change conflicts.
@@ -317,6 +354,10 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
   public static let publicationFailed = ErrorCode(rawValue: "publication_failed")
   /// Too many requests; see ``APIError/retryAfter``.
   public static let rateLimited = ErrorCode(rawValue: "rate_limited")
+  /// The sign-in provider does not let people register themselves.
+  public static let registrationClosed = ErrorCode(rawValue: "registration_closed")
+  /// A change that needs the provider's page was asked for without a return URL.
+  public static let returnURLRequired = ErrorCode(rawValue: "return_url_required")
   /// The change needs a review.
   public static let reviewRequired = ErrorCode(rawValue: "review_required")
   /// The credential lacks the scope the route needs.

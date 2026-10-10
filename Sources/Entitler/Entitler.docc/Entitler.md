@@ -6,8 +6,10 @@ Check feature access, record usage, show pricing and manage subscriptions with E
 
 Entitler lets SaaS teams manage plans, feature access, usage limits and customer grants. This
 package has two clients: ``EntitlerServer`` for your servers, built from a secret key, and
-``EntitlerClient`` for your apps, built from a customer token or an identity token. Both return a
-``Customer``, so code that gates features and records usage is written once.
+``EntitlerClient`` for your apps, built from a customer token, or a publishable key with or
+without an identity token. Both return a ``Customer``, so code that gates features, records usage
+and offers the customer's own billing choices is written once. The `EntitlerTesting` library fakes
+a customer for your own tests.
 
 ```swift
 import Entitler
@@ -17,7 +19,7 @@ let customer = try server.customer("user_123")
 try await customer.register(name: "Ada Lovelace", email: "ada@example.com")
 
 if await customer.isEntitled(to: Features.exportPDF, default: false) {
-  try await customer.recordUsage(of: Features.aiCredits, amount: 1)
+  try await customer.recordUsage(of: Features.aiCredits, amount: 1, idempotencyKey: job.id)
 }
 ```
 
@@ -30,7 +32,9 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``EntitlerOptions``
 - ``TokenCredential``
 - ``IdentityCredential``
+- ``PublishableCredential``
 - ``ClientCredential``
+- ``SignedInCredential``
 - ``TokenProvider``
 
 ### Customers
@@ -38,11 +42,8 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``Customer``
 - ``ServerCustomer``
 - ``SignedInCustomer``
-- ``Vendor``
 - ``Customers``
 - ``CustomerHandle``
-- ``PlanChoice``
-- ``SKU``
 
 ### Features
 
@@ -63,15 +64,13 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``Entitlement``
 - ``EntitlementSource``
 - ``Upgrade``
-- ``CustomerPlans``
-- ``MoveOption``
-- ``HeldPlan``
+- ``Period``
 
 ### Usage
 
 - ``UsageResult``
 - ``UsageHold``
-- ``OpenHold``
+- ``Hold``
 - ``UsageMode``
 - ``UsageOutcome``
 - ``UsageRefusal``
@@ -83,13 +82,34 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``PagedList``
 - ``Page``
 
+### Billing
+
+- ``CustomerPlans``
+- ``HeldPlan``
+- ``PendingChange``
+- ``MoveOption``
+- ``OptionPlan``
+- ``Move``
+- ``MoveAction``
+- ``SubscribeStep``
+- ``PlanChange``
+- ``ChangeEffect``
+- ``ChangeTiming``
+- ``BillingSync``
+- ``ProviderPage``
+- ``PlanChoice``
+- ``SKU``
+- ``BillingMode``
+- ``GrantChange``
+- ``Grant``
+
 ### Offline snapshots
 
 - ``verifySnapshot(_:expecting:)``
 - ``SnapshotExpectation``
 - ``VerifiedSnapshot``
 - ``IssuedSnapshot``
-- ``JSONWebKeySet``
+- ``SnapshotKeys``
 - ``JSONWebKey``
 
 ### Visitors
@@ -114,6 +134,7 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``TokenError``
 - ``SnapshotError``
 - ``ArgumentError``
+- ``ClientClosedError``
 
 ### Scopes
 

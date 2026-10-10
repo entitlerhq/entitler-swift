@@ -74,16 +74,27 @@ public struct EntitlementSource: Codable, Hashable, Sendable {
   public let features: [String]?
 }
 
-/// A plan that would give a feature the customer lacks.
+/// A plan that would give a feature the customer lacks, with the same ``move`` and ``action`` as
+/// ``MoveOption``, so an "Upgrade" button and the paywall share one rule.
 public struct Upgrade: Codable, Hashable, Sendable {
   /// The plan's key.
   public let plan: String
   /// The plan's name.
   public let name: String
   /// How the customer would take it.
-  public let move: UpgradeMove
-  /// Whether only the vendor can make the move.
-  public let salesLed: Bool
+  public let move: Move
+  /// Who can make the move.
+  public let action: MoveAction
+  /// Why the move is ``MoveAction/unavailable``, a sentence for the developer; else `nil`.
+  public let reason: String?
+}
+
+/// A billing period: the stable ``key`` writes take, and the ``label`` to show.
+public struct Period: Codable, Hashable, Sendable {
+  /// The key, such as `monthly`, which stays the same however the label is shown.
+  public let key: String
+  /// The label to show, such as Monthly.
+  public let label: String
 }
 
 /// Whether a customer is entitled to one feature, with its value and sources.
@@ -202,6 +213,28 @@ public struct Entitlement: Codable, Hashable, Sendable {
   public let remaining: FeatureValue?
   /// For a metered feature, when the meter resets.
   public let resetsAt: Date?
+  /// When not entitled, the plans that would give the feature; always empty in a snapshot,
+  /// since offline gating never offers a purchase.
+  public let upgrades: [Upgrade]
+
+  enum CodingKeys: String, CodingKey {
+    case key, type, entitled, value, sources, used, held, remaining, resetsAt, upgrades
+  }
+
+  /// Decodes an entitlement; a snapshot's claims carry no `upgrades`.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    key = try container.decode(String.self, forKey: .key)
+    type = try container.decode(FeatureType.self, forKey: .type)
+    entitled = try container.decode(Bool.self, forKey: .entitled)
+    value = try container.decode(FeatureValue.self, forKey: .value)
+    sources = try container.decode([EntitlementSource].self, forKey: .sources)
+    used = try container.decodeIfPresent(Int64.self, forKey: .used)
+    held = try container.decodeIfPresent(Int64.self, forKey: .held)
+    remaining = try container.decodeIfPresent(FeatureValue.self, forKey: .remaining)
+    resetsAt = try container.decodeIfPresent(Date.self, forKey: .resetsAt)
+    upgrades = try container.decodeIfPresent([Upgrade].self, forKey: .upgrades) ?? []
+  }
 }
 
 /// Every entitlement a customer holds, groups included, with Entitler's decision on each.
@@ -257,6 +290,78 @@ public struct HeldPlan: Codable, Hashable, Sendable {
   public let version: Int64?
   /// Whether it is held because it is the product's default.
   public let byDefault: Bool
+  /// How often it is billed, or `nil` when Entitler sets no period.
+  public let period: Period?
+  /// When it renews, or `nil` when it does not.
+  public let renewsAt: Date?
+  /// The change booked for ``renewsAt``, or `nil`.
+  public let pending: PendingChange?
+  /// The store or provider that bills it, or `nil` when nothing does. A plan Apple or Google bills
+  /// is changed in the store's own management page; one Stripe bills, in
+  /// ``Customer/billingPortal(returnURL:timeout:)``.
+  public let billedBy: Provider?
+}
+
+/// A change booked for a plan's renewal.
+public enum PendingChange: Codable, Hashable, Sendable {
+  /// A move to another plan.
+  case move(to: PlanRef)
+  /// A cancellation, moving to the product's default plan, or to none.
+  case cancel(movingTo: PlanRef?)
+  /// A change this SDK does not know yet.
+  case unknown(String)
+
+  enum CodingKeys: String, CodingKey {
+    case type, plan, movingTo
+  }
+
+  /// Decodes the change from its `type`.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let type = try container.decode(String.self, forKey: .type)
+    switch type {
+    case "move": self = .move(to: try container.decode(PlanRef.self, forKey: .plan))
+    case "cancel":
+      self = .cancel(movingTo: try container.decodeIfPresent(PlanRef.self, forKey: .movingTo))
+    default: self = .unknown(type)
+    }
+  }
+
+  /// Encodes the change as the API writes it.
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .move(let plan):
+      try container.encode("move", forKey: .type)
+      try container.encode(plan, forKey: .plan)
+    case .cancel(let plan):
+      try container.encode("cancel", forKey: .type)
+      try container.encode(plan, forKey: .movingTo)
+    case .unknown(let type):
+      try container.encode(type, forKey: .type)
+    }
+  }
+}
+
+/// The plan or add-on of a ``MoveOption``.
+public struct OptionPlan: Codable, Hashable, Sendable {
+  /// The plan's public id.
+  public let id: String
+  /// The plan's key, such as `pro`.
+  public let key: String
+  /// The plan's name.
+  public let name: String
+  /// Whether it is a base plan or an add-on.
+  public let kind: PlanKind
+  /// The plan's description.
+  public let description: String
+  /// True for a product's default plan.
+  public let isDefault: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case id, key, name, kind, description
+    case isDefault = "default"
+  }
 }
 
 /// What a move would change about a feature.
@@ -283,8 +388,8 @@ public struct ProviderPrice: Codable, Hashable, Sendable {
 
 /// A way to buy a plan through a connector, such as a Stripe price or an App Store product.
 public struct OfferedSKU: Codable, Hashable, Sendable {
-  /// The billing period it sells.
-  public let period: String
+  /// The billing period it sells, or `nil` for none.
+  public let period: Period?
   /// The connector, such as `stripe` or `apple`.
   public let connector: String
   /// The provider's ids.
@@ -293,26 +398,26 @@ public struct OfferedSKU: Codable, Hashable, Sendable {
   public let price: ProviderPrice?
 }
 
-/// A plan or add-on a customer can move to, in ``CustomerPlans``.
+/// A plan or add-on a customer can move to, in ``CustomerPlans``: one button on a paywall or a
+/// billing page.
 public struct MoveOption: Codable, Hashable, Sendable {
   /// The plan or add-on.
-  public let plan: PlanRef
-  /// The product it is in.
+  public let plan: OptionPlan
+  /// The product it is in; `nil` for an add-on for every product.
   public let product: Product?
-  /// How it changes the customer's plans.
-  public let move: MoveKind
-  /// The plan or add-on it replaces.
+  /// The plan or add-on the move starts from, or `nil` for a sign-up.
   public let from: PlanRef?
-  /// Up, down or across.
-  public let direction: MoveDirection
-  /// How the path to it is sold.
-  public let mode: SellingMode
-  /// Whether the customer can take it alone.
-  public let selfServe: Bool
-  /// Why it cannot be taken now, fit to show the customer.
-  public let disabledReason: String?
+  /// How it changes the customer's plans.
+  public let move: Move
+  /// Who can make it, which decides the button: ``MoveAction/buy`` calls
+  /// ``Customer/subscribe(to:period:quantity:returnURL:register:idempotencyKey:timeout:)``.
+  public let action: MoveAction
+  /// Why it is ``MoveAction/unavailable``, a sentence for the developer; else `nil`.
+  public let reason: String?
   /// When it would apply.
   public let when: ChangeTiming
+  /// The plan's billing periods, from the catalogue, whatever sells them.
+  public let periods: [Period]
   /// What it would change.
   public let impact: [Impact]
   /// The ways to buy it.
@@ -400,8 +505,8 @@ public struct ChannelListing: Codable, Hashable, Sendable {
 
 /// How one billing period of a plan sells on each connection.
 public struct PeriodListing: Codable, Hashable, Sendable {
-  /// The billing period's label.
-  public let period: String
+  /// The billing period, or `nil` for a one-time plan.
+  public let period: Period?
   /// One entry per connection, oldest first.
   public let channels: [ChannelListing]
 }
@@ -446,7 +551,7 @@ public struct PricingPlan: Codable, Hashable, Sendable {
 
 /// The plans on sale, for a pricing page.
 ///
-/// Pricing is always computed now, whatever ``EntitlerOptions/asOf`` says.
+/// Pricing is always computed now, never at another instant.
 public struct Pricing: Codable, Hashable, Sendable, StaleMarking {
   /// The environment the answer comes from.
   public let environment: AnswerEnvironment
@@ -533,6 +638,10 @@ public struct Page<Item: Codable & Hashable & Sendable>: Codable, Hashable, Send
   public let items: [Item]
   /// The cursor of the next page, or `nil` on the last page.
   public let next: String?
+  /// On the customer list, how many customers the environment holds.
+  public let used: Int64?
+  /// On the customer list, how many it may hold: an amount, or ``FeatureValue/unlimited``.
+  public let limit: FeatureValue?
 }
 
 /// An entry of the usage log.
@@ -608,7 +717,7 @@ public struct CustomerUsage: Codable, Hashable, Sendable {
 /// What a usage write did: the check after it, plus the outcome.
 ///
 /// A refusal is an answer, not an error: see ``outcome`` and ``refusal``.
-public struct UsageResult: Codable, Hashable, Sendable {
+public struct UsageResult: Codable, Hashable, Sendable, Replaying {
   /// The customer's external id.
   public let customer: String
   /// The instant the answer is for.
@@ -669,6 +778,9 @@ public struct UsageResult: Codable, Hashable, Sendable {
   public let testers: Bool
   /// The experiment the customer is in, if any.
   public let experiment: ExperimentAssignment?
+  /// True when the API answered an earlier call's key: this call changed nothing, and this is
+  /// the first call's answer.
+  public internal(set) var replayed = false
 
   enum CodingKeys: String, CodingKey {
     case customer, asOf, feature, type, entitled, value, sources, used, held, remaining, resetsAt
@@ -706,10 +818,11 @@ public struct UsageHold: Codable, Hashable, Sendable {
 }
 
 /// Why one event of a batch was not recorded.
-public struct UsageEventError: Codable, Hashable, Sendable {
-  /// The code a single report would answer.
+public struct UsageEventError: Error, Codable, Hashable, Sendable {
+  /// The code a single report would answer, or the SDK's own for an event it refused or a
+  /// request that failed.
   public let code: ErrorCode
-  /// The message, fit to show a person.
+  /// The message, written for the developer.
   public let message: String
 }
 
@@ -727,6 +840,8 @@ public struct UsageEventResult: Codable, Hashable, Sendable {
   public let error: UsageEventError?
   /// The event's idempotency key, to resend it safely.
   public let idempotencyKey: String
+  /// True when its request repeated an earlier one, so it changed nothing.
+  public let replayed: Bool
 }
 
 /// What a batch did: one result per event, in input order, and the totals.
@@ -742,7 +857,7 @@ public struct UsageBatchResult: Codable, Hashable, Sendable {
 }
 
 /// A customer as lists and changes describe them.
-public struct CustomerSummary: Codable, Hashable, Sendable {
+public struct CustomerSummary: Codable, Hashable, Sendable, Replaying {
   /// Entitler's id for the customer.
   public let id: String
   /// The id your app uses for the customer.
@@ -773,6 +888,8 @@ public struct CustomerSummary: Codable, Hashable, Sendable {
   public let track: Track
   /// Whether every purchase they made used test money.
   public let testCustomer: Bool
+  /// True when the API answered an earlier call's key, so this call changed nothing.
+  public internal(set) var replayed = false
 
   enum CodingKeys: String, CodingKey {
     case id, name, email, sample, createdAt, plan, plans, defaultPlan, status, kind, metadata
@@ -784,7 +901,7 @@ public struct CustomerSummary: Codable, Hashable, Sendable {
 
 /// A customer, as ``ServerCustomer/register(name:email:metadata:visitor:idempotencyKey:timeout:)``
 /// answers.
-public struct RegisteredCustomer: Codable, Hashable, Sendable {
+public struct RegisteredCustomer: Codable, Hashable, Sendable, Replaying {
   /// Entitler's id for the customer.
   public let id: String
   /// The id your app uses for the customer.
@@ -795,6 +912,8 @@ public struct RegisteredCustomer: Codable, Hashable, Sendable {
   public let createdAt: Date
   /// Whether this call registered them.
   public let created: Bool
+  /// True when the API answered an earlier call's key, so this call changed nothing.
+  public internal(set) var replayed = false
 
   enum CodingKeys: String, CodingKey {
     case id, createdAt, created
@@ -849,30 +968,6 @@ public struct ProviderPeriod: Codable, Hashable, Sendable {
   public let cancelsAt: Date?
 }
 
-/// A change booked for the end of the period.
-public struct PendingChange: Codable, Hashable, Sendable {
-  /// A move or a cancellation.
-  public let type: PendingChangeType
-  /// For a move, the plan it moves to.
-  public let plan: PlanRef?
-  /// For a cancellation, the default plan it moves to.
-  public let movingTo: PlanRef?
-}
-
-/// A move made in Entitler only, while the provider bills the plan held before.
-public struct PlanOverride: Codable, Hashable, Sendable {
-  /// The plan held before.
-  public let from: PlanRef
-  /// The billing period held before.
-  public let period: String
-  /// The connection that bills it.
-  public let billedBy: Channel?
-  /// When the override was made.
-  public let since: Date
-  /// Who made it.
-  public let by: String
-}
-
 /// A customer's subscription in one product.
 public struct Subscription: Codable, Hashable, Sendable {
   /// The product.
@@ -883,8 +978,8 @@ public struct Subscription: Codable, Hashable, Sendable {
   public let version: Int64
   /// The cohort, when the plan has them.
   public let cohort: Int64?
-  /// The billing period.
-  public let period: String
+  /// The billing period, or `nil` for none.
+  public let period: Period?
   /// When it started.
   public let startedAt: Date
   /// When it renews.
@@ -897,8 +992,6 @@ public struct Subscription: Codable, Hashable, Sendable {
   public let pending: PendingChange?
   /// Where it was bought.
   public let purchase: Purchase
-  /// An override, if one is in force.
-  public let override: PlanOverride?
 }
 
 /// A customer's holdings in one product.
@@ -927,8 +1020,122 @@ public struct Grant: Codable, Hashable, Sendable {
   public let revokedAt: Date?
   /// Why it was given.
   public let reason: String
-  /// Who gave it.
+  /// The key or person that gave it.
   public let by: String
+  /// The person or system that decided, as the write named it.
+  public let actor: String?
+}
+
+/// A grant made or revoked, as `grant` and ``ServerCustomer/revokeGrant(id:reason:actor:idempotencyKey:timeout:)`` answer.
+public struct GrantChange: Codable, Hashable, Sendable, Replaying {
+  /// The grant, so a support tool keeps its id.
+  public let grant: Grant
+  /// True when the API answered an earlier call's key, so this call changed nothing.
+  public internal(set) var replayed = false
+
+  enum CodingKeys: String, CodingKey { case grant }
+}
+
+/// What a plan change did, as ``Customer/cancel(addOn:product:idempotencyKey:timeout:)``,
+/// ``Customer/undoPendingChange(addOn:product:idempotencyKey:timeout:)``,
+/// ``ServerCustomer/setPlan(to:period:when:billing:until:register:reason:actor:idempotencyKey:timeout:)``
+/// and ``ServerCustomer/setAddOn(_:quantity:when:reason:actor:idempotencyKey:timeout:)`` answer,
+/// and a ``SubscribeStep/done(_:)`` step holds.
+public struct PlanChange: Codable, Hashable, Sendable, Replaying {
+  /// The product the change is in.
+  public let product: Product?
+  /// The plan or add-on the change leaves the customer on; `nil` when they hold none in that
+  /// product.
+  public let plan: PlanRef?
+  /// An add-on's quantity after the change: 0 when removed; `nil` for a plan.
+  public let quantity: Int64?
+  /// Now, or at renewal.
+  public let effective: ChangeEffect
+  /// When it takes effect.
+  public let at: Date
+  /// When the customer returns to the product's default plan, from `setPlan`'s `until`.
+  public let until: Date?
+  /// False when nothing changed: nothing to cancel, nothing pending, or a plan already held.
+  public let changed: Bool
+  /// True when the API answered an earlier call's key, so this call changed nothing.
+  public internal(set) var replayed = false
+
+  enum CodingKeys: String, CodingKey {
+    case product, plan, quantity, effective, at, until, changed
+  }
+}
+
+/// The next step after ``Customer/subscribe(to:period:quantity:returnURL:register:idempotencyKey:timeout:)``.
+public enum SubscribeStep: Codable, Hashable, Sendable, Replaying {
+  /// The change is made.
+  case done(PlanChange)
+  /// Send the customer to the provider's page: Stripe Checkout, or a confirmation such as
+  /// 3-D Secure. The plan changes once they pay. In an app, open it in
+  /// `ASWebAuthenticationSession` with a universal link as the return URL.
+  case pay(URL)
+  /// The provider is still confirming a payment, such as a bank debit: show it as pending. The
+  /// plan changes when it succeeds.
+  case confirming
+  /// A store bills the product, so the customer changes it in the store's own management page.
+  case manage(billedBy: Provider)
+  /// A step this SDK does not know yet, with its raw name.
+  case unknown(String)
+
+  enum CodingKeys: String, CodingKey {
+    case next, url, billedBy
+  }
+
+  /// Decodes the step from its `next`.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let next = try container.decode(String.self, forKey: .next)
+    switch next {
+    case "done": self = .done(try PlanChange(from: decoder))
+    case "pay": self = .pay(try container.decode(URL.self, forKey: .url))
+    case "confirming": self = .confirming
+    case "manage": self = .manage(billedBy: try container.decode(Provider.self, forKey: .billedBy))
+    default: self = .unknown(next)
+    }
+  }
+
+  /// Encodes the step as the API writes it.
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .done(let change):
+      try container.encode("done", forKey: .next)
+      try change.encode(to: encoder)
+    case .pay(let url):
+      try container.encode("pay", forKey: .next)
+      try container.encode(url, forKey: .url)
+    case .confirming: try container.encode("confirming", forKey: .next)
+    case .manage(let provider):
+      try container.encode("manage", forKey: .next)
+      try container.encode(provider, forKey: .billedBy)
+    case .unknown(let next): try container.encode(next, forKey: .next)
+    }
+  }
+
+  /// True when the step is done and the API answered an earlier call's key.
+  public var replayed: Bool {
+    get {
+      if case .done(let change) = self { return change.replayed }
+      return false
+    }
+    set {
+      if case .done(var change) = self {
+        change.replayed = newValue
+        self = .done(change)
+      }
+    }
+  }
+}
+
+/// Whether reading the provider's state moved the customer, as ``Customer/syncBilling(timeout:)``
+/// answers.
+public struct BillingSync: Codable, Hashable, Sendable {
+  /// True when the provider's state moved the customer to another plan or quantity.
+  public let changed: Bool
 }
 
 /// An entry of a customer's activity.
@@ -940,9 +1147,7 @@ public struct Activity: Codable, Hashable, Sendable {
 }
 
 /// A customer in full: subscriptions, entitlements, grants, usage log and activity.
-///
-/// Billing changes answer this too, with ``selfServe``.
-public struct CustomerDetail: Codable, Hashable, Sendable {
+public struct CustomerDetail: Codable, Hashable, Sendable, Replaying {
   /// The customer.
   public let customer: CustomerSummary
   /// The instant the answer is for.
@@ -967,14 +1172,20 @@ public struct CustomerDetail: Codable, Hashable, Sendable {
   public let usage: Page<UsageEvent>
   /// Their activity.
   public let activity: [Activity]
-  /// For a billing change, whether the customer could have made it themselves.
-  public let selfServe: Bool?
   /// The environment the answer comes from.
   public let environment: AnswerEnvironment
+  /// True when ``Customers/create(id:name:email:plan:period:metadata:idempotencyKey:timeout:)``
+  /// answered an earlier call's key, so this call changed nothing.
+  public internal(set) var replayed = false
+
+  enum CodingKeys: String, CodingKey {
+    case customer, asOf, subscription, defaultPlan, products, addOns, entitlements, banked
+    case moveOptions, grants, usage, activity, environment
+  }
 }
 
 /// A customer's place on a track.
-public struct CustomerTrack: Codable, Hashable, Sendable {
+public struct CustomerTrack: Codable, Hashable, Sendable, Replaying {
   /// The customer's external id.
   public let customer: String
   /// Their track.
@@ -983,6 +1194,8 @@ public struct CustomerTrack: Codable, Hashable, Sendable {
   public let source: TrackSource?
   /// The track they left.
   public let previousTrackID: String?
+  /// True when the API answered an earlier call's key, so this call changed nothing.
+  public internal(set) var replayed = false
 
   enum CodingKeys: String, CodingKey {
     case customer, track, source
@@ -1030,203 +1243,7 @@ public struct CustomerBilling: Codable, Hashable, Sendable {
   public let products: [ProductBilling]?
 }
 
-/// A connection, as provider answers name it.
-public struct ProviderConnection: Codable, Hashable, Sendable {
-  /// The connection's id.
-  public let id: String
-  /// Its name.
-  public let name: String
-  /// The provider.
-  public let provider: Provider
-}
-
-/// The plan a provider item or payment sells.
-public struct ProviderSale: Codable, Hashable, Sendable {
-  /// The plan's key.
-  public let plan: String
-  /// Its version.
-  public let version: Int64?
-  /// The billing period.
-  public let period: String
-  /// A base plan or an add-on.
-  public let kind: PlanKind
-  /// The product's key.
-  public let product: String?
-}
-
-/// An item of a provider subscription.
-public struct ProviderItem: Codable, Hashable, Sendable {
-  /// The provider's id for the item.
-  public let id: String
-  /// The provider's ids for what it sells.
-  public let ids: [String: String]
-  /// The quantity.
-  public let quantity: Int64
-  /// The listing that sells it, if any.
-  public let sale: ProviderSale?
-}
-
-/// A period of a provider subscription.
-public struct ProviderSubscriptionPeriod: Codable, Hashable, Sendable {
-  /// When it starts.
-  public let startsAt: Date
-  /// When it ends.
-  public let endsAt: Date
-}
-
-/// A subscription as the provider last reported it.
-public struct ProviderSubscription: Codable, Hashable, Sendable {
-  /// The provider's id.
-  public let id: String
-  /// The provider's status.
-  public let status: String
-  /// Whether it bills.
-  public let billing: Bool
-  /// Its period.
-  public let period: ProviderSubscriptionPeriod?
-  /// When its trial ends.
-  public let trialEndsAt: Date?
-  /// When it is cancelled.
-  public let cancelsAt: Date?
-  /// Its items.
-  public let items: [ProviderItem]
-}
-
-/// An amount of money.
-public struct MoneyAmount: Codable, Hashable, Sendable {
-  /// The amount in the currency's smallest unit.
-  public let value: Int64
-  /// The ISO currency code.
-  public let currency: String
-}
-
-/// A one-time payment as the provider last reported it.
-public struct ProviderPayment: Codable, Hashable, Sendable {
-  /// The provider's id.
-  public let id: String
-  /// The provider's ids for what it bought.
-  public let ids: [String: String]
-  /// The quantity.
-  public let quantity: Int64
-  /// The amount paid.
-  public let amount: MoneyAmount?
-  /// Paid or refunded.
-  public let status: ProviderPaymentStatus
-  /// When it was paid.
-  public let paidAt: Date
-  /// The listing that sells it, if any.
-  public let sale: ProviderSale?
-}
-
-/// A customer's subscriptions and payments in one connection.
-public struct ProviderState: Codable, Hashable, Sendable {
-  /// The subscriptions.
-  public let subscriptions: [ProviderSubscription]
-  /// The one-time payments.
-  public let payments: [ProviderPayment]
-}
-
-/// One connection's view of a customer.
-public struct ProviderConnectionState: Codable, Hashable, Sendable {
-  /// The connection.
-  public let connection: ProviderConnection
-  /// When it was last read.
-  public let readAt: Date
-  /// What it reported.
-  public let state: ProviderState
-}
-
-/// The facts behind an alert.
-public struct AlertFacts: Codable, Hashable, Sendable {
-  /// The customer's external id.
-  public let customer: String?
-  /// The connection's id.
-  public let connection: String
-  /// The provider.
-  public let provider: Provider
-  /// The product's key.
-  public let product: String?
-  /// The plans involved.
-  public let plans: [String]?
-  /// The plan involved.
-  public let plan: String?
-  /// The plan held.
-  public let held: String?
-  /// The plan's id.
-  public let planID: String?
-  /// The held plan's id.
-  public let heldID: String?
-  /// The provider's ids.
-  public let ids: String?
-  /// A count.
-  public let count: Int64?
-  /// Where it was bought.
-  public let boughtThrough: String?
-  /// Why a purchase was refused.
-  public let refusal: AlertRefusal?
-  /// The reason, fit to show a person.
-  public let reason: String?
-  /// The provider's customer id.
-  public let providerCustomer: String?
-
-  enum CodingKeys: String, CodingKey {
-    case customer, connection, provider, product, plans, plan, held, ids, count, boughtThrough
-    case refusal, reason, providerCustomer
-    case planID = "planId"
-    case heldID = "heldId"
-  }
-}
-
-/// A customer named by an alert.
-public struct AlertCustomer: Codable, Hashable, Sendable {
-  /// The customer's external id.
-  public let externalID: String
-  /// The customer's name.
-  public let name: String
-
-  enum CodingKeys: String, CodingKey {
-    case name
-    case externalID = "externalId"
-  }
-}
-
-/// A rule a payment provider breaks.
-public struct Alert: Codable, Hashable, Sendable {
-  /// The alert's id.
-  public let id: String
-  /// The rule broken.
-  public let rule: AlertRule
-  /// A title fit to show a person.
-  public let title: String
-  /// A message fit to show a person.
-  public let message: String
-  /// The facts behind it.
-  public let facts: AlertFacts
-  /// The customer.
-  public let customer: AlertCustomer?
-  /// The connection.
-  public let connection: ProviderConnection
-  /// When it opened.
-  public let openedAt: Date
-  /// When it was last seen.
-  public let seenAt: Date
-  /// When it was resolved.
-  public let resolvedAt: Date?
-  /// Who resolved it.
-  public let resolvedBy: AlertResolver?
-}
-
-/// A customer's subscriptions and payments in each provider, and the alerts they raise.
-public struct CustomerProviders: Codable, Hashable, Sendable {
-  /// Each connection's view.
-  public let connections: [ProviderConnectionState]
-  /// The open alerts.
-  public let alerts: [Alert]
-  /// The provider customers linked to them.
-  public let linked: [String]?
-}
-
-/// Where to send the customer: a checkout or a billing portal.
+/// The payment provider's page: the billing portal.
 public struct ProviderPage: Codable, Hashable, Sendable {
   /// The provider, such as `stripe`.
   public let provider: String

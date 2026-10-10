@@ -30,7 +30,45 @@ enum Conformance {
   }()
 
   static func names(_ file: String) -> [String] {
-    (files[file] ?? []).filter { applies($0) }.compactMap { $0["name"] as? String }
+    (files[file] ?? []).filter { applies($0) && contradiction(file, $0) == nil }
+      .compactMap { $0["name"] as? String }
+  }
+
+  static func contradicted() -> [String: String] {
+    var reasons: [String: String] = [:]
+    for file in fileNames {
+      for testCase in files[file] ?? [] where applies(testCase) {
+        if let reason = contradiction(file, testCase) {
+          reasons["\(file)/\(testCase["name"] as! String)"] = reason
+        }
+      }
+    }
+    return reasons
+  }
+
+  static func contradiction(_ file: String, _ testCase: JSONObject) -> String? {
+    switch file {
+    case "cache-keys":
+      if testCase["principalKind"] as? String == "identity" {
+        return
+          "Spec v9 3.5 and 4.3: publishable keys start ent_pk_, so EntitlerClient refuses the case's ent_pub_ key as secret."
+      }
+      if testCase["asOf"] is String, testCase["principalKind"] as? String != "key" {
+        return "Spec v9 4.3 and 6.6: no in-app client takes asOf."
+      }
+      if testCase["asOf"] is String,
+        (testCase["built"] as? JSONObject)?["route"] as? String == "/pricing"
+      {
+        return "Spec v9 6.6: pricing is always computed now and never sends Entitler-As-Of."
+      }
+    case "idempotency-keys":
+      if testCase["method"] as? String == "recordUsageBatch" {
+        return
+          "Spec v9 5.2 and 7.2: recordUsageBatch takes no key; each request's key derives from its events."
+      }
+    default: break
+    }
+    return nil
   }
 
   static func skipped(_ file: String) -> [String] {
@@ -152,6 +190,14 @@ private func headers(_ object: Any?) -> [String: String] {
     }
     let skipped = Conformance.fileNames.flatMap(Conformance.skipped)
     #expect(skipped.count == 10, "Skipped only for lone surrogates: \(skipped)")
+    let contradicted = Conformance.contradicted()
+    #expect(contradicted.count == 20, "Cases spec v9 contradicts: \(contradicted)")
+  }
+
+  @Test func casesSpecNineContradictsAreListedWithAReason() {
+    for (name, reason) in Conformance.contradicted().sorted(by: { $0.key < $1.key }) {
+      #expect(!reason.isEmpty, "\(name)")
+    }
   }
 
   @Test(arguments: Conformance.names("cache-keys"))
@@ -163,30 +209,29 @@ private func headers(_ object: Any?) -> [String: String] {
     let route = built["route"] as! String
     let visitor = testCase["visitor"] as? String
     let store = KeyLog()
-    let api = FakeAPI(host: "*") { request in .json(body(forPath: request.path)) }
+    let memory = MemoryCacheStore(capacity: 10)
+    let api = FakeAPI(host: "*") { request in
+      .json(body(forPath: request.path), headers: ["ETag": "\"conformance\""])
+    }
     var options = api.options()
     options.baseURL = URL(string: built["baseUrl"] as! String)!
-    options.cache = store
-    options.asOf = instant(testCase["asOfInput"] ?? testCase["asOf"])
+    let asOf = instant(testCase["asOfInput"] ?? testCase["asOf"])
     let customer: any Customer
     var server: EntitlerServer?
     switch testCase["principalKind"] as! String {
     case "key":
-      server = try EntitlerServer(key: testCase["credential"] as! String, options: options)
+      server = try EntitlerServer(
+        key: testCase["credential"] as! String, cache: store, options: options)
       customer = try server!.customer(params["id"] ?? "x")
-    case "customer-token":
-      customer = try EntitlerClient(
-        token: testCase["credential"] as! String, visitor: visitor, options: options
-      ).me
     default:
       customer = try EntitlerClient(
-        key: testCase["key"] as! String, identityToken: testCase["identityToken"] as! String,
-        visitor: visitor,
-        options: options
+        token: testCase["credential"] as! String, visitor: visitor, cache: memory, options: options
       ).me
     }
     try await api.run {
       switch route {
+      case "/customers/{id}/entitlements/{feature}" where asOf != nil:
+        _ = try await (customer as! ServerCustomer).check(params["feature"]!, asOf: asOf)
       case "/customers/{id}/entitlements/{feature}":
         _ = try await customer.check(params["feature"]!)
       case "/customers/{id}/entitlements": _ = try await customer.entitlements()
@@ -197,7 +242,11 @@ private func headers(_ object: Any?) -> [String: String] {
       default: _ = try await server!.features()
       }
     }
-    #expect(store.asked.get == [outcome["cacheKey"] as! String])
+    if server == nil {
+      #expect(await memory.entry(forKey: outcome["cacheKey"] as! String) != nil)
+    } else {
+      #expect(store.asked.get == [outcome["cacheKey"] as! String])
+    }
     #expect(sha256(outcome["serialised"] as! String) == outcome["cacheKey"] as? String)
     #expect(api.last.url.absoluteString == testCase["url"] as? String)
     let expected = outcome["requestHeaders"] as! JSONObject
@@ -239,10 +288,10 @@ private func headers(_ object: Any?) -> [String: String] {
           case "/customers/{id}/entitlements/{feature}":
             _ = try await customer.check(parameter == "feature" ? value : params["feature"]!)
           case "/customers/{id}/subscription/add-ons/{plan}":
-            _ = try await customer.removeAddOn(value)
+            _ = try await customer.cancel(addOn: value)
           case "/customers/{id}/usage/holds/{holdId}": _ = try await customer.hold(id: value)
-          case "/customers/{id}/grants/{grantId}": _ = try await customer.vendor.revokeGrant(value)
-          default: _ = try await customer.vendor.cancelUsage(value)
+          case "/customers/{id}/grants/{grantId}": _ = try await customer.revokeGrant(id: value)
+          default: _ = try await customer.cancelUsage(id: value)
           }
         } catch is EntitlerError {}
       }
@@ -280,27 +329,32 @@ private func headers(_ object: Any?) -> [String: String] {
     let call: () async throws -> Void
     switch testCase["method"] as! String {
     case "write":
-      call = { _ = try await customer.recordUsage(of: credits, amount: 1, idempotencyKey: key) }
+      call = { _ = try await customer.recordUsage(of: credits, amount: 1, idempotencyKey: key!) }
     case "withHold":
       call = {
-        _ = try await customer.withHold(of: credits, amount: 10, idempotencyKey: key) { hold in
+        _ = try await customer.withHold(of: credits, amount: 10, idempotencyKey: key!) { hold in
           try hold.use(15)
         }
       }
-    case "batchEvent":
-      call = {
-        _ = try await server.recordUsageBatch([
-          UsageBatchEvent(customer: "user_42", feature: credits, amount: 1, idempotencyKey: key)
-        ])
-      }
     default:
-      let events = (testCase["events"] as? Int) ?? 1
+      let answer = Box<UsageBatchResult?>(nil)
       call = {
-        _ = try await server.recordUsageBatch(
-          (0..<events).map {
-            UsageBatchEvent(customer: "user_42", feature: credits, idempotencyKey: "e\($0)")
-          },
-          idempotencyKey: key)
+        answer.with {
+          $0 = nil
+        }
+        let result = try await server.recordUsageBatch([
+          UsageBatchEvent(customer: "user_42", feature: credits, amount: 1, idempotencyKey: key!)
+        ])
+        answer.with { $0 = result }
+      }
+      if outcome["valid"] as? Bool != true {
+        try await api.run(call)
+        let result = try #require(answer.get?.results.first)
+        #expect(result.outcome == .error)
+        #expect(result.error?.code == .invalidIdempotencyKey)
+        #expect(result.error?.message == outcome["message"] as? String)
+        #expect(api.count == 0)
+        return
       }
     }
     guard outcome["valid"] as? Bool == true else {
@@ -431,7 +485,7 @@ private func headers(_ object: Any?) -> [String: String] {
       tokenProvider: {
         calls.with { $0 += 1 }
         return token
-      }, options: api.options { $0.cache = nil })
+      }, cache: nil, options: api.options())
     if outcome["kind"] as? String == "TokenError" {
       do {
         _ = try await api.run { try await client.me.check("export_pdf") }
@@ -554,10 +608,10 @@ private func headers(_ object: Any?) -> [String: String] {
           _ = try await customer.recordUsage(
             of: Feature<Metered>(call["feature"] as! String),
             amount: (call["amount"] as! NSNumber).int64Value,
-            idempotencyKey: call["idempotencyKey"] as? String)
+            idempotencyKey: call["idempotencyKey"] as! String)
         default:
           _ = try await customer.subscribe(
-            to: .plan(call["plan"] as! String), period: call["period"] as? String,
+            to: call["plan"] as! String, period: call["period"] as? String,
             idempotencyKey: call["idempotencyKey"] as? String)
         }
       }
@@ -609,7 +663,7 @@ private func headers(_ object: Any?) -> [String: String] {
     let keys: [JSONWebKey] =
       expected["keys"] is [Any]
       ? try JSONDecoder().decode([JSONWebKey].self, from: keyData)
-      : try JSONDecoder().decode(JSONWebKeySet.self, from: keyData).keys
+      : try JSONDecoder().decode(SnapshotKeys.self, from: keyData).keys
     var expectation = SnapshotExpectation(
       keys: keys, customer: expected["customer"] as! String,
       environment: expected["environment"] as! String,
@@ -745,13 +799,14 @@ struct Attempts {
     let options = api.options {
       $0.maxRetries = maxRetries
       $0.maxRetryDelay = maxRetryDelay
-      $0.cache = nil
     }
     let tokens = provider ?? (credential["tokens"] as? [String]) ?? []
     let customer: any Customer
     switch credential["kind"] as? String ?? (provider == nil ? nil : "customerTokenProvider") {
     case "customerToken":
-      customer = try EntitlerClient(token: credential["token"] as! String, options: options).me
+      customer = try EntitlerClient(
+        token: credential["token"] as! String, cache: nil, options: options
+      ).me
     case "customerTokenProvider":
       customer = try EntitlerClient(
         tokenProvider: {
@@ -760,17 +815,19 @@ struct Attempts {
             return $0 - 1
           }
           return tokens[min(index, tokens.count - 1)]
-        }, options: options
+        }, cache: nil, options: options
       ).me
     default:
-      customer = try EntitlerServer(key: credential["key"] as? String ?? "k", options: options)
-        .customer("user_42")
+      customer = try EntitlerServer(
+        key: credential["key"] as? String ?? "k", cache: nil, options: options
+      ).customer("user_42")
     }
     var result = Attempts()
     do {
       try await Hooks.$current.withValue(hooks) {
         if write {
-          _ = try await customer.recordUsage(of: Feature<Metered>("ai_credits"), amount: 1)
+          _ = try await customer.recordUsage(
+            of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "conformance-write")
         } else {
           _ = try await customer.check("export_pdf")
         }

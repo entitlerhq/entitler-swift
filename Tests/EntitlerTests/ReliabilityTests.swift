@@ -30,7 +30,7 @@ import Testing
     let api = FakeAPI { _ in .failure(.networkConnectionLost) }
     do {
       _ = try await api.run {
-        try await api.server { $0.maxRetries = 3 }.customer("u").vendor.cancelUsage("u_1")
+        try await api.server { $0.maxRetries = 3 }.customer("u").cancelUsage(id: "u_1")
       }
       Issue.record("Expected an error")
     } catch EntitlerError.connection(let error) {
@@ -100,7 +100,7 @@ import Testing
     do {
       _ = try await api.run {
         try await api.server { $0.maxRetries = 1 }.customer("u").recordUsage(
-          of: Feature<Metered>("ai_credits"), amount: 1, timeout: 0.05)
+          of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k", timeout: 0.05)
       }
       Issue.record("Expected an error")
     } catch EntitlerError.timeout(let error) {
@@ -185,11 +185,12 @@ import Testing
     let server = try api.server()
     try await api.run {
       _ = try await server.customer("u").check("sso")
-      _ = try await server.customer("other").vendor.cancelUsage("x")
+      _ = try await server.customer("other").cancelUsage(id: "x")
       _ = try await server.customer("u").check("sso")
       #expect(api.count == 2)
       api.advance(1)
-      _ = try await server.customer("u").recordUsage(of: Feature<Metered>("ai_credits"), amount: 1)
+      _ = try await server.customer("u").recordUsage(
+        of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
       _ = try await server.customer("u").check("sso")
       #expect(api.count == 4)
       #expect(api.last.header("If-None-Match") == "\"e1\"")
@@ -216,7 +217,7 @@ import Testing
   @Test func notModifiedWithoutKeptAnswerIsAnHTTPError() async throws {
     let api = FakeAPI(replies: [Reply(status: 304)])
     do {
-      _ = try await api.run { try await api.server { $0.cache = nil }.customer("u").check("sso") }
+      _ = try await api.run { try await api.server(cache: nil).customer("u").check("sso") }
       Issue.record("Expected an error")
     } catch EntitlerError.api(let error) {
       #expect(error.status == 304)
@@ -240,7 +241,7 @@ import Testing
 
   @Test func cachingCanBeTurnedOff() async throws {
     let api = FakeAPI { _ in .json(Fixture.check(), headers: ["Cache-Control": "max-age=60"]) }
-    let customer = try api.server { $0.cache = nil }.customer("u")
+    let customer = try api.server(cache: nil).customer("u")
     try await api.run {
       _ = try await customer.check("sso")
       _ = try await customer.check("sso")
@@ -258,21 +259,15 @@ import Testing
         headers: ["Cache-Control": "max-age=60"])
     }
     try await api.run {
-      _ = try await EntitlerServer(key: "a", options: api.options { $0.cache = store }).customer(
+      _ = try await EntitlerServer(key: "a", cache: store, options: api.options()).customer(
         "u"
       ).check("sso")
-      _ = try await EntitlerServer(key: "b", options: api.options { $0.cache = store }).customer(
+      _ = try await EntitlerServer(key: "b", cache: store, options: api.options()).customer(
         "u"
       ).check("sso")
-      _ = try await EntitlerServer(
-        key: "a",
-        options: api.options {
-          $0.cache = store
-          $0.asOf = Date(timeIntervalSince1970: 0)
-        }
-      )
-      .customer("u").check("sso")
-      let server = try EntitlerServer(key: "a", options: api.options { $0.cache = store })
+      _ = try await EntitlerServer(key: "a", cache: store, options: api.options())
+        .customer("u").check("sso", asOf: Date(timeIntervalSince1970: 0))
+      let server = try EntitlerServer(key: "a", cache: store, options: api.options())
       _ = try await server.customer("u").pricing(visitor: "aaaaaaaaaaaaaaaa")
       _ = try await server.customer("u").pricing(visitor: "bbbbbbbbbbbbbbbb")
       _ = try await server.customer("u").check("sso")
@@ -282,35 +277,38 @@ import Testing
     #expect(store.keys.allSatisfy { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
   }
 
-  @Test func refreshedTokensHaveTheirOwnEntriesButServeStaleWhenTheProviderFails() async throws {
+  @Test func aFailingProviderNeverAnswersEntriesKeptUnderAnEarlierToken() async throws {
     let tokens = Box(0)
     let api = FakeAPI { _ in
       .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
     }
     struct Offline: Error {}
-    let errors = Box(0)
+    let errors = Box<[any Error]>([])
     let client = try EntitlerClient(
       tokenProvider: {
         let n = tokens.with {
           $0 += 1
           return $0
         }
-        if n == 3 { throw Offline() }
+        if n >= 3 { throw Offline() }
         return makeJWT([
           "sub": "user_1", "iat": 1_800_000_000, "exp": 1_800_000_200 + n * 200, "n": n,
         ])
-      }, options: api.options { $0.onError = { _ in errors.with { $0 += 1 } } })
+      }, options: api.options { $0.onError = { error in errors.with { $0.append(error) } } })
     try await api.run {
       _ = try await client.me.check("sso")
       api.advance(350)
       _ = try await client.me.check("sso")
       #expect(api.count == 2)
       api.advance(200)
-      let stale = try await client.me.check("sso")
-      #expect(stale.stale)
+      do {
+        _ = try await client.me.check("sso")
+        Issue.record("Expected a token error")
+      } catch EntitlerError.token {}
+      #expect(await client.me.isEntitled(to: "sso", default: false) == false)
     }
-    #expect(tokens.get == 3)
-    #expect(errors.get == 1)
+    #expect(api.count == 2)
+    #expect(errors.get.count == 1)
   }
 
   @Test func memoryStoreEvictsTheLeastRecentlyUsed() async {
@@ -452,7 +450,7 @@ import Testing
           return $0
         }
         return makeJWT(["sub": "user_1", "exp": 1_800_000_100, "n": n])
-      }, options: api.options { $0.cache = nil })
+      }, cache: nil, options: api.options())
     try await api.run {
       #expect(calls.get == 0)
       _ = try await client.me.check("sso")
@@ -531,7 +529,7 @@ import Testing
         calls.with { $0 += 1 }
         try await Task.sleep(nanoseconds: 50_000_000)
         return makeJWT(["sub": "u"])
-      }, options: api.options { $0.cache = nil })
+      }, cache: nil, options: api.options())
     try await api.run {
       try await withThrowingTaskGroup(of: Void.self) { group in
         for _ in 0..<10 { group.addTask { _ = try await client.me.check("sso") } }
@@ -553,7 +551,7 @@ import Testing
       #expect(error.message.hasPrefix("The token provider failed"))
     }
     let blank = try EntitlerClient(
-      key: "pk", identityTokenProvider: { "  " }, options: api.options())
+      key: "ent_pk_1", identityTokenProvider: { "  " }, options: api.options())
     do {
       _ = try await api.run { try await blank.me.check("sso") }
     } catch EntitlerError.token(let error) {
@@ -579,7 +577,8 @@ import Testing
             status: 201)
     }
     let token = makeJWT(["iss": "https://accounts.google.com", "sub": "1"])
-    let client = try EntitlerClient(key: "pk_live", identityToken: token, options: api.options())
+    let client = try EntitlerClient(
+      key: "ent_pk_live", identityToken: token, options: api.options())
     try await api.run {
       let registered = try await client.register()
       #expect(registered.created)
@@ -587,7 +586,7 @@ import Testing
       #expect(api.last.method == "PUT")
       #expect(api.last.path == "/customers/me")
       #expect(api.last.body == nil || api.last.body?.isEmpty == true)
-      #expect(api.last.header("Authorization") == "Bearer pk_live")
+      #expect(api.last.header("Authorization") == "Bearer ent_pk_live")
       #expect(api.last.header("Entitler-Identity-Token") == token)
       let scopes = try await client.scopes()
       #expect(scopes.scopes == [.entitlementsRead, .customersRegister])

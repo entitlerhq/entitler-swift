@@ -17,15 +17,18 @@ import Testing
     let clients: [any Customer] = [
       try api.server().customer("u"),
       try EntitlerClient(token: "tok", options: api.options()).me,
-      try EntitlerClient(key: "pk", identityToken: makeJWT(["sub": "s"]), options: api.options())
-        .me,
+      try EntitlerClient(
+        key: "ent_pk_1", identityToken: makeJWT(["sub": "s"]), options: api.options()
+      )
+      .me,
     ]
     for customer in clients {
       for write in [false, true] {
         do {
           if write {
             _ = try await api.run {
-              try await customer.recordUsage(of: Feature<Metered>("ai_credits"), amount: 1)
+              try await customer.recordUsage(
+                of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
             }
           } else {
             _ = try await api.run { try await customer.check("sso") }
@@ -55,7 +58,7 @@ import Testing
         try await server.customer(id).check("sso")
       }
       await #expect(throws: ArgumentError(message: "Pass an id that is not made only of dots.")) {
-        try await server.customer("u").vendor.revokeGrant(id)
+        try await server.customer("u").revokeGrant(id: id)
       }
     }
     _ = try? await api.run { try await server.customer(".a.").check("sso") }
@@ -88,7 +91,7 @@ import Testing
     struct Offline: Error {}
     let client = try EntitlerClient(
       tokenProvider: { throw Offline() }, visitor: "abcdefghijklmnop",
-      options: api.options { $0.asOf = Date(timeIntervalSince1970: 0) })
+      options: api.options())
     _ = try await api.run { try await client.snapshotKeys() }
     for name in ["Authorization", "Entitler-Identity-Token", "Entitler-Visitor", "Entitler-As-Of"] {
       #expect(api.last.header(name) == nil)
@@ -133,7 +136,7 @@ import Testing
       #"["entitler-cache-v1","GET","https://api.entitler.dev/customers/u/entitlements/sso","key",""#
         + principal + #"",null,"abcdefghijklmnop"]"#)
     #expect(server.core.cacheKey(request, token: "sk_test") == expected)
-    let identity = try EntitlerClient(key: "pk", identityToken: "id.token.x")
+    let identity = try EntitlerClient(key: "ent_pk_1", identityToken: "id.token.x")
     let key = identity.core.cacheKey(try Request("GET", ["customers", "me"]), token: "id.token.x")
     #expect(key.count == 64)
     #expect(jsonString("a\"b\\c\n\u{01}é/") == #""a\"b\\c\n\u0001é/""#)
@@ -178,7 +181,7 @@ import Testing
       Reply(status: 304, headers: ["Cache-Control": "max-age=60"]),
       .json(Fixture.check()),
     ])
-    let customer = try api.server { $0.cache = store }.customer("u")
+    let customer = try api.server(cache: store).customer("u")
     try await api.run {
       _ = try await customer.check("sso")
       _ = try await customer.check("sso")
@@ -211,7 +214,7 @@ import Testing
     }
     while api.count == 0 { try await Task.sleep(nanoseconds: 5_000_000) }
     _ = try await api.run {
-      try await customer.vendor.setMeter(Feature<Metered>("ai_credits"), to: 1)
+      try await customer.adjustMeter(Feature<Metered>("ai_credits"), to: 1, idempotencyKey: "k")
     }
     _ = try await read.value
     _ = try await api.run { try await customer.check("sso") }
@@ -252,8 +255,7 @@ import Testing
     }
     let errors = Box(0)
     let api = FakeAPI { _ in .json(Fixture.check(), headers: ["ETag": "\"e\""]) }
-    let customer = try api.server {
-      $0.cache = BrokenStore()
+    let customer = try api.server(cache: BrokenStore()) {
       $0.onError = { error in if error is Broken { errors.with { $0 += 1 } } }
     }.customer("u")
     let check = try await api.run { try await customer.check("sso") }
@@ -274,8 +276,7 @@ import Testing
     }
     let api = FakeAPI { _ in .json(Fixture.check(), headers: ["Cache-Control": "max-age=60"]) }
     _ = try await api.run {
-      try await api.server {
-        $0.cache = TimingStore(lives)
+      try await api.server(cache: TimingStore(lives)) {
         $0.staleFor = 100
       }.customer("u").check("sso")
     }
@@ -370,7 +371,7 @@ import Testing
         calls.with { $0 += 1 }
         try await Task.sleep(nanoseconds: 200_000_000)
         return makeJWT(["sub": "u"])
-      }, options: api.options { $0.cache = nil })
+      }, cache: nil, options: api.options())
     let hooks = api.hooks
     let cancelled = Task {
       try await Hooks.$current.withValue(hooks) { try await client.me.check("sso") }
@@ -421,7 +422,8 @@ import Testing
       },
       options: api.options { $0.maxRetries = 1 })
     _ = try await api.run {
-      try await client.me.recordUsage(of: Feature<Metered>("ai_credits"), amount: 1)
+      try await client.me.recordUsage(
+        of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
     }
     #expect(api.count == 3)
     #expect(calls.get == 2)
@@ -457,38 +459,12 @@ import Testing
     #expect(api.count == 0)
   }
 
-  @Test func eachRequestSendsItsOwnKeyAndFailedRequestsAnswerErrors() async throws {
-    let api = FakeAPI { request in
-      if request.header("Idempotency-Key") == "batch:1" { return .failure(.notConnectedToInternet) }
-      let events = (request.json?["events"] as? [[String: Any]]) ?? []
-      let results = events.indices.map {
-        #"{"index":\#($0),"outcome":"recorded","id":"u","late":false,"error":null}"#
-      }
-      return .json(
-        #"{"results":[\#(results.joined(separator: ","))],"recorded":0,"duplicates":0,"errors":0}"#)
-    }
-    let events = (0..<1_200).map {
-      UsageBatchEvent(
-        customer: "c", feature: Feature<Metered>("ai_credits"), idempotencyKey: "e\($0)")
-    }
-    let result = try await api.run {
-      try await api.server { $0.maxRetries = 0 }.recordUsageBatch(events, idempotencyKey: "batch")
-    }
-    #expect(
-      Set(api.requests.get.compactMap { $0.header("Idempotency-Key") }) == [
-        "batch:0", "batch:1", "batch:2",
-      ])
-    #expect(result.results.count == 1_200)
-    #expect(result.results[500].outcome == .error)
-    #expect(result.results[500].error?.code == .connectionFailed)
-    #expect(result.results[500].idempotencyKey == "e500")
-    #expect(result.recorded == 700)
-    #expect(result.errors == 500)
-  }
-
   @Test func timedOutAndRefusedRequestsCarryTheirCodes() async throws {
     let api = FakeAPI { _ in .hanging }
-    let one = [UsageBatchEvent(customer: "c", feature: Feature<Metered>("ai_credits"))]
+    let one = [
+      UsageBatchEvent(
+        customer: "c", feature: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
+    ]
     let timedOut = try await api.run {
       try await api.server {
         $0.maxRetries = 0
@@ -512,18 +488,6 @@ import Testing
     #expect(throws: ArgumentError(message: "Provide the id your app uses for the customer.")) {
       try server.customer("   ")
     }
-  }
-
-  @Test func theBatchKeyLeavesRoomForTheRequestIndex() async throws {
-    let api = FakeAPI()
-    let one = [UsageBatchEvent(customer: "c", feature: Feature<Metered>("ai_credits"))]
-    await #expect(
-      throws: ArgumentError(message: "Pass idempotencyKey as 1 to 190 printable ASCII characters.")
-    ) {
-      try await api.server().recordUsageBatch(
-        one, idempotencyKey: String(repeating: "k", count: 191))
-    }
-    #expect(api.count == 0)
   }
 
   @Test func retryAfterReadsDigitsAndTheThreeDateForms() {

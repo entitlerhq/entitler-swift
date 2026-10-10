@@ -172,3 +172,25 @@ private func declaration(of feature: FeatureListing, name: String, access: Strin
   return call + ["    \"\(feature.key)\","] + ["    includes: ["]
     + leaves.map { "      \"\($0)\"," } + ["    ]", "  )"]
 }
+
+/// Renders a key set as `entitler snapshot-keys` writes it: each key's members in the order
+/// Entitler sends them, two-space indented, with a final line feed.
+public func renderSnapshotKeys(_ keys: SnapshotKeys) -> String {
+  let members = keys.keys.map { key in
+    let fields = [
+      ("kty", key.kty), ("crv", key.crv), ("x", key.x), ("y", key.y), ("kid", key.kid),
+      ("alg", key.alg), ("use", key.use),
+    ]
+    return "    {\n"
+      + fields.map { "      \(jsonText($0.0)): \(jsonText($0.1))" }.joined(separator: ",\n")
+      + "\n    }"
+  }
+  return "{\n  \"keys\": [\n" + members.joined(separator: ",\n") + "\n  ]\n}\n"
+}
+
+private func jsonText(_ text: String) -> String {
+  let data =
+    (try? JSONSerialization.data(withJSONObject: [text], options: [.withoutEscapingSlashes]))
+    ?? Data()
+  return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())
+}

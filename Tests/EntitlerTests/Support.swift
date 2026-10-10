@@ -129,8 +129,11 @@ final class FakeAPI: Sendable {
     try await Hooks.$current.withValue(hooks) { try await body() }
   }
 
-  func server(_ change: (inout EntitlerOptions) -> Void = { _ in }) throws -> EntitlerServer {
-    try EntitlerServer(key: "sk_test", options: options(change))
+  func server(
+    cache: (any CacheStore)? = MemoryCacheStore(capacity: 1_000),
+    _ change: (inout EntitlerOptions) -> Void = { _ in }
+  ) throws -> EntitlerServer {
+    try EntitlerServer(key: "sk_test", cache: cache, options: options(change))
   }
 }
 
@@ -205,19 +208,30 @@ enum Fixture {
     #"{"customer":"user_1","asOf":"2026-10-09T01:47:13Z","feature":"ai_credits","type":"metered","entitled":true,"value":300,"sources":[],"used":10,"held":5,"remaining":285,"resetsAt":"2026-10-18T21:30:35.544+02:00","upgrades":[],\#(context),"futureField":{"x":1}}"#
 
   static func usage(
-    outcome: String = "recorded", refusal: String = "null", holdID: String = "null", amount: Int = 3
+    outcome: String = "recorded", refusal: String = "null", holdID: String = "null",
+    amount: Int = 3,
+    expiresAt: String = "null"
   ) -> String {
-    #"{"customer":"user_1","asOf":"2026-10-09T01:47:13.968Z","feature":"ai_credits","type":"metered","entitled":true,"value":300,"sources":[],"used":3,"held":0,"remaining":297,"resetsAt":null,"upgrades":[],"outcome":"\#(outcome)","refusal":\#(refusal),"id":"u_1","holdId":\#(holdID),"mode":"gate","amount":\#(amount),"meterChange":3,"overBy":0,"late":false,"occurredAt":"2026-10-09T01:47:13.968Z","expiresAt":null,"reportedAs":"api",\#(context)}"#
+    #"{"customer":"user_1","asOf":"2026-10-09T01:47:13.968Z","feature":"ai_credits","type":"metered","entitled":true,"value":300,"sources":[],"used":3,"held":0,"remaining":297,"resetsAt":null,"upgrades":[],"outcome":"\#(outcome)","refusal":\#(refusal),"id":"u_1","holdId":\#(holdID),"mode":"gate","amount":\#(amount),"meterChange":3,"overBy":0,"late":false,"occurredAt":"2026-10-09T01:47:13.968Z","expiresAt":\#(expiresAt),"reportedAs":"api",\#(context)}"#
   }
 
   static let entitlements =
-    #"{"customer":"user_1","asOf":"2026-10-09T01:47:13.968Z","entitlements":[{"key":"export_pdf","type":"boolean","entitled":true,"value":true,"sources":[]},{"key":"collaboration","type":"group","entitled":false,"value":0,"sources":[{"type":"group","features":["team_seats"]}]},{"key":"ai_credits","type":"metered","entitled":true,"value":"unlimited","sources":[],"used":2,"held":0,"remaining":"unlimited","resetsAt":null}],\#(context)}"#
+    #"{"customer":"user_1","asOf":"2026-10-09T01:47:13.968Z","entitlements":[{"key":"export_pdf","type":"boolean","entitled":true,"value":true,"sources":[],"upgrades":[]},{"key":"collaboration","type":"group","entitled":false,"value":0,"sources":[{"type":"group","features":["team_seats"]}],"upgrades":[{"plan":"team","name":"Team","move":"upgrade","action":"contact","reason":null}]},{"key":"ai_credits","type":"metered","entitled":true,"value":"unlimited","sources":[],"used":2,"held":0,"remaining":"unlimited","resetsAt":null,"upgrades":[]}],\#(context)}"#
+
+  static func planChange(changed: Bool = true, next: String? = nil) -> String {
+    let step = next.map { #""next":"\#($0)","# } ?? ""
+    return
+      #"{\#(step)"product":{"key":"app","name":"App"},"plan":{"id":"p_2","key":"pro","name":"Pro"},"quantity":null,"effective":"renewal","at":"2026-11-01T00:00:00.000Z","until":null,"changed":\#(changed)}"#
+  }
+
+  static let pricing =
+    #"{\#(context),"customer":null,"defaultPlan":"free","products":[],"plans":[]}"#
 
   static let summary =
     #"{"id":"c_1","externalId":"user_1","name":"Ada","email":"ada@example.com","environmentId":"env_1","sample":false,"createdAt":"2026-10-09T01:47:13.968Z","plan":{"id":"p_1","key":"free","name":"Free","version":1},"plans":[{"id":"p_1","key":"free","name":"Free","version":1,"product":"app"}],"defaultPlan":{"id":"p_1","key":"free","name":"Free"},"status":"active","kind":"default","metadata":{"team":"a"},"track":{"id":"trk_1","name":"All customers"},"testCustomer":false}"#
 
   static let detail =
-    #"{"customer":\#(summary),"asOf":"2026-10-09T01:47:13.968Z","subscription":{"product":{"key":"app","name":"App"},"plan":{"id":"p_2","key":"pro","name":"Pro"},"version":1,"cohort":null,"period":"monthly","startedAt":"2026-10-01T00:00:00Z","renewsAt":"2026-11-01T00:00:00Z","billing":null,"addOns":[{"plan":{"id":"p_3","key":"sso_addon","name":"SSO"},"version":1,"quantity":1,"countable":false,"addedAt":"2026-10-01T00:00:00Z","movingTo":null,"purchase":{"money":"test","channel":null,"release":2,"change":null,"arm":null}}],"pending":{"type":"cancel","movingTo":{"id":"p_1","key":"free","name":"Free"}},"purchase":{"money":"test","channel":{"provider":"stripe","connectionId":"conn_1"},"release":2,"change":null,"arm":"control"},"override":null},"defaultPlan":null,"products":[],"addOns":[],"entitlements":[],"banked":{"ai_credits":5},"moveOptions":[],"grants":[{"id":"g_1","feature":"sso","value":"true","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Trial","by":"key"}],"usage":{"items":[],"next":null},"activity":[{"text":"Registered","at":"2026-10-01T00:00:00Z"}],"selfServe":true,"environment":{"id":"env_1","name":"development","kind":"test"}}"#
+    #"{"customer":\#(summary),"asOf":"2026-10-09T01:47:13.968Z","subscription":{"product":{"key":"app","name":"App"},"plan":{"id":"p_2","key":"pro","name":"Pro"},"version":1,"cohort":null,"period":{"key":"monthly","label":"Monthly"},"startedAt":"2026-10-01T00:00:00Z","renewsAt":"2026-11-01T00:00:00Z","billing":null,"addOns":[{"plan":{"id":"p_3","key":"sso_addon","name":"SSO"},"version":1,"quantity":1,"countable":false,"addedAt":"2026-10-01T00:00:00Z","movingTo":null,"purchase":{"money":"test","channel":null,"release":2,"change":null,"arm":null}}],"pending":{"type":"cancel","movingTo":{"id":"p_1","key":"free","name":"Free"}},"purchase":{"money":"test","channel":{"provider":"stripe","connectionId":"conn_1"},"release":2,"change":null,"arm":"control"}},"defaultPlan":null,"products":[],"addOns":[],"entitlements":[],"banked":{"ai_credits":5},"moveOptions":[],"grants":[{"id":"g_1","feature":"sso","value":"true","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Trial","by":"key"}],"usage":{"items":[],"next":null},"activity":[{"text":"Registered","at":"2026-10-01T00:00:00Z"}],"environment":{"id":"env_1","name":"development","kind":"test"}}"#
 }
 
 struct Unchecked<Value>: @unchecked Sendable {
