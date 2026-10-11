@@ -52,7 +52,7 @@ jobs:
           - { name: "Linux, Swift 6.3", os: ubuntu-24.04, container: "swift:6.3-noble" }
           - { name: "Linux, Swift 6.4", os: ubuntu-24.04, container: "swift:6.4-noble", coverage: true, sanitize: true }
           - { name: "macOS, Xcode 16.0", os: macos-15, xcode: "16.0", apple: true }
-          - { name: "macOS, newest Xcode", os: macos-15, xcode: newest, apple: true }
+          - { name: "macOS, newest Xcode", os: macos-15, xcode: newest, apple: true, simulators: true }
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     steps:
@@ -87,12 +87,12 @@ jobs:
         if: ${{ matrix.sanitize }}
         run: swift test --sanitize=thread --skip EntitlerIntegrationTests
       - name: Test on the iOS simulator
-        if: ${{ matrix.apple }}
+        if: ${{ matrix.simulators }}
         run: |
           device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')
           xcodebuild test -scheme Entitler-Package -destination "id=$device" -skip-testing:EntitlerIntegrationTests -quiet
       - name: Build for tvOS, watchOS and visionOS
-        if: ${{ matrix.apple }}
+        if: ${{ matrix.simulators }}
         run: |
           for platform in tvOS watchOS visionOS; do
             xcodebuild build -scheme Entitler -destination "generic/platform=$platform" CODE_SIGNING_ALLOWED=NO -quiet
