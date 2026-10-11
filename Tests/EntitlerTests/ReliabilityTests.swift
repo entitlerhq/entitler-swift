@@ -51,6 +51,17 @@ import Testing
     #expect(api.sleeps.get == [0.5, 1, 2, 4, 8, 8])
   }
 
+  @Test func backoffNeverOverflowsForManyRetries() async throws {
+    let api = FakeAPI { _ in .error(503, code: "unavailable") }
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await api.server { $0.maxRetries = 64 }.customer("u").billing() }
+    }
+    #expect(api.count == 65)
+    #expect(api.sleeps.get.count == 64)
+    #expect(api.sleeps.get.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 8 })
+    #expect(api.sleeps.get.suffix(50).allSatisfy { $0 == 8 })
+  }
+
   @Test func backoffIsRandomWithinBounds() async throws {
     let api = FakeAPI(replies: [.error(500, code: "internal"), .json(Fixture.check())])
     let picked = Box<[ClosedRange<Double>]>([])

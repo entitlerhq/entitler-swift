@@ -152,6 +152,28 @@ import Testing
     #expect(try await customer.usage().log.items.count == 1)
   }
 
+  @Test func refusalsFollowTheAPI() async throws {
+    let fake = FakeCustomer([
+      "ai_credits": .metered(value: 10, used: 8), "exports": .metered(value: 0, used: 0),
+    ])
+    let customer = fake.customer
+    let exports = Feature<Metered>("exports")
+    let report = try await customer.recordUsage(of: exports, amount: 1, idempotencyKey: "a")
+    #expect(report.outcome == .refused)
+    #expect(report.refusal == .notEntitled)
+    let hold = try await customer.holdUsage(of: exports, amount: 1, idempotencyKey: "b")
+    #expect(hold.refusal == .notEntitled)
+    let over = try await customer.recordUsage(of: Self.credits, amount: 3, idempotencyKey: "c")
+    #expect(over.refusal == .overAllowance)
+    let overHold = try await customer.holdUsage(of: Self.credits, amount: 3, idempotencyKey: "d")
+    #expect(overHold.refusal == .overAllowance)
+    let fits = try await customer.recordUsage(of: Self.credits, amount: 2, idempotencyKey: "e")
+    #expect(fits.outcome == .recorded)
+    let observed = try await customer.recordUsage(
+      of: exports, amount: 1, idempotencyKey: "f", mode: .observe)
+    #expect(observed.outcome == .recorded)
+  }
+
   @Test func settlingMoreThanTheHoldIsAnInvalidBody() async throws {
     let fake = FakeCustomer(["ai_credits": .metered(value: 100, used: 0)])
     let customer = fake.customer
