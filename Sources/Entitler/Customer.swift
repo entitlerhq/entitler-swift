@@ -484,7 +484,8 @@ extension Customer {
   /// The payment provider's page where the customer updates payment details and sees invoices.
   ///
   /// It changes no plan. A customer the provider has never billed answers `404`
-  /// ``ErrorCode/notFound``. In an app, open the URL in `ASWebAuthenticationSession`.
+  /// ``ErrorCode/notFound``, and an environment with no payment provider connected answers `409`
+  /// ``ErrorCode/stale``. In an app, open the URL in `ASWebAuthenticationSession`.
   ///
   /// - Parameters:
   ///   - returnURL: Where the page sends the customer back.

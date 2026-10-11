@@ -43,7 +43,7 @@ to its [snapshot](offline-snapshots.md).
 | --- | --- |
 | `subscribe` | `return_url_required`, `payment_required` (declined), `not_self_serve`, `scope_required`, `customer_not_found`, `capability_required`, `invalid_body` |
 | `cancel`, `undoPendingChange` | `not_self_serve`, `scope_required`, `customer_not_found`, `capability_required` |
-| `billingPortal` | `not_found` (never billed), `scope_required`, `capability_required` |
+| `billingPortal` | `not_found` (never billed), `stale` (no payment provider connected), `scope_required`, `capability_required` |
 | `syncBilling` | `rate_limited`, `scope_required`, `capability_required`, and `503` while a change is followed |
 | `setPlan` | `payment_required`, `billed_elsewhere`, `customer_not_found`, `invalid_body` |
 | `setAddOn` | `payment_required`, `billed_elsewhere`, `not_found`, `customer_not_found`, `invalid_body` |

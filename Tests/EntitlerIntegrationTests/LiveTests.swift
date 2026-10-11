@@ -360,7 +360,7 @@ struct LiveTests {
       let revoked = try await customer.revokeGrant(id: granted.grant.id)
       #expect(revoked.grant.revokedAt != nil)
       #expect(try await customer.syncBilling().changed == false)
-      await Live.expectAPIError(404, .notFound) {
+      await Live.expectAPIError(409, .stale) {
         _ = try await customer.billingPortal(returnURL: Live.returnURL)
       }
     }
