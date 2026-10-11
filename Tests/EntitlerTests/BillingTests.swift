@@ -189,9 +189,9 @@ import Testing
       #expect(api.last.method == "PUT")
       #expect(api.last.path == "/customers/u/add-ons/extra_seats")
       #expect(api.last.json?.keys.sorted() == ["actor", "quantity"])
-      try await customer.setAddOn("extra_seats", quantity: 0, when: .now)
+      try await customer.setAddOn("extra_seats", quantity: 0, reason: "Deal ended.")
       #expect(api.last.json?["quantity"] as? Int == 0)
-      #expect(api.last.json?["when"] as? String == "now")
+      #expect(api.last.json?.keys.sorted() == ["quantity", "reason"])
     }
   }
 
