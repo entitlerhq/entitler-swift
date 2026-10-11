@@ -90,9 +90,9 @@ import Testing
 
   @Test func retryAfterParsing() {
     let now = Date(timeIntervalSince1970: 0)
-    #expect(retryAfter("12", now: now) == 12)
-    #expect(retryAfter("soon", now: now) == nil)
-    #expect(retryAfter("Thu, 01 Jan 1970 00:00:10 GMT", now: now) == 10)
+    #expect(retryAfterSeconds("12", now: now) == 12)
+    #expect(retryAfterSeconds("soon", now: now) == nil)
+    #expect(retryAfterSeconds("Thu, 01 Jan 1970 00:00:10 GMT", now: now) == 10)
   }
 
   @Test func timeoutsAreRetriedThenThrown() async throws {

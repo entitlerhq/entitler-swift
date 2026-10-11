@@ -130,6 +130,12 @@ private struct SnapshotClaims: Decodable {
 public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectation) throws
   -> VerifiedSnapshot
 {
+  try verifiedSnapshot(token, expecting: expected)
+}
+
+func verifiedSnapshot(_ token: String, expecting expected: SnapshotExpectation) throws
+  -> VerifiedSnapshot
+{
   guard !expected.customer.trimmed.isEmpty, !expected.environment.trimmed.isEmpty else {
     throw ArgumentError(message: Messages.expectation)
   }

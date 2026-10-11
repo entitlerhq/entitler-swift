@@ -523,7 +523,7 @@ final class Core: Sendable, CustomReflectable {
       message: text("message") ?? "Entitler answered with HTTP \(status).",
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
-        retryAfter($0, now: now)
+        retryAfterSeconds($0, now: now)
       },
       idempotencyKey: idempotencyKey,
       payment: payment)
@@ -556,7 +556,7 @@ func jsonString(_ text: String) -> String {
   return out + "\""
 }
 
-func retryAfter(_ value: String, now: Date) -> TimeInterval? {
+func retryAfterSeconds(_ value: String, now: Date) -> TimeInterval? {
   let value = value.trimmingCharacters(in: .whitespaces)
   if !value.isEmpty, value.utf8.allSatisfy({ (0x30...0x39).contains($0) }) {
     return TimeInterval(value) ?? .greatestFiniteMagnitude
@@ -590,7 +590,7 @@ extension Response {
       cacheControl: http.value(forHTTPHeaderField: "Cache-Control"),
       age: http.value(forHTTPHeaderField: "Age").flatMap { Int($0.trimmed) },
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
-        Entitler.retryAfter($0, now: now)
+        retryAfterSeconds($0, now: now)
       },
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
       replayed: http.value(forHTTPHeaderField: "Idempotent-Replayed") == "true")

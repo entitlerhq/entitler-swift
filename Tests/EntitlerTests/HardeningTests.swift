@@ -492,14 +492,14 @@ import Testing
 
   @Test func retryAfterReadsDigitsAndTheThreeDateForms() {
     let now = Date(timeIntervalSince1970: 784_111_777)
-    #expect(retryAfter("120", now: now) == 120)
-    #expect(retryAfter("1.5", now: now) == nil)
-    #expect(retryAfter("-3", now: now) == nil)
-    #expect(retryAfter("soon", now: now) == nil)
-    #expect(retryAfter("Sun, 06 Nov 1994 08:49:40 GMT", now: now) == 3)
-    #expect(retryAfter("Sunday, 06-Nov-94 08:49:40 GMT", now: now) == 3)
-    #expect(retryAfter("Sun Nov  6 08:49:40 1994", now: now) == 3)
-    #expect(retryAfter("Sun, 06 Nov 1994 08:00:00 GMT", now: now) == 0)
+    #expect(retryAfterSeconds("120", now: now) == 120)
+    #expect(retryAfterSeconds("1.5", now: now) == nil)
+    #expect(retryAfterSeconds("-3", now: now) == nil)
+    #expect(retryAfterSeconds("soon", now: now) == nil)
+    #expect(retryAfterSeconds("Sun, 06 Nov 1994 08:49:40 GMT", now: now) == 3)
+    #expect(retryAfterSeconds("Sunday, 06-Nov-94 08:49:40 GMT", now: now) == 3)
+    #expect(retryAfterSeconds("Sun Nov  6 08:49:40 1994", now: now) == 3)
+    #expect(retryAfterSeconds("Sun, 06 Nov 1994 08:00:00 GMT", now: now) == 0)
   }
 
   @Test(arguments: [

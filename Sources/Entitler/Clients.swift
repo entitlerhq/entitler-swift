@@ -218,11 +218,11 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
   public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectation) throws
     -> VerifiedSnapshot
   {
-    try Entitler.verifySnapshot(token, expecting: expected)
+    try verifiedSnapshot(token, expecting: expected)
   }
 
   /// A new visitor id for the app to keep; the same as ``Entitler/newVisitorID()``.
-  public func newVisitorID() -> String { Entitler.newVisitorID() }
+  public func newVisitorID() -> String { randomVisitorID() }
 }
 
 func batchKey<Event>(
@@ -433,7 +433,7 @@ public final class EntitlerClient<Credential: ClientCredential>: Sendable, Custo
   public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectation) throws
     -> VerifiedSnapshot
   {
-    try Entitler.verifySnapshot(token, expecting: expected)
+    try verifiedSnapshot(token, expecting: expected)
   }
 }
 
