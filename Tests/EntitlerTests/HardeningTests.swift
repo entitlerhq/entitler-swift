@@ -727,6 +727,27 @@ import Testing
     #expect(await server.core.state.trackedCustomers == 0)
   }
 
+  @Test func aWriteForgottenWhenPruningStillRevalidatesOlderEntries() async throws {
+    let api = FakeAPI { request in
+      request.method == "GET"
+        ? .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+        : .json(Fixture.planChange())
+    }
+    let server = try api.server()
+    let customer = try server.customer("a")
+    try await api.run {
+      _ = try await customer.check("sso")
+      api.advance(1)
+      _ = try await customer.cancel()
+      api.advance(1)
+      for index in 0..<10_001 { await server.core.state.bump("o\(index)", at: api.clock.get) }
+      api.advance(1)
+      _ = try await customer.check("sso")
+    }
+    #expect(api.count == 3)
+    #expect(api.last.header("If-None-Match") == "\"e\"")
+  }
+
   @Test func perCustomerStateStaysBounded() async throws {
     let state = ClientState()
     let now = Date(timeIntervalSince1970: 1_800_000_000)

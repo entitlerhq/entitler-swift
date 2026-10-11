@@ -93,6 +93,7 @@ actor ClientState {
   private var generations: [String: (generation: UInt64, at: Date)] = [:]
   private var counter: UInt64 = 0
   private var outageUntil: Date?
+  private var forgottenUntil: Date?
   private var probing = false
   private(set) var signedInID: String?
 
@@ -102,12 +103,15 @@ actor ClientState {
     counter += 1
     generations[customer] = (counter, now)
     guard generations.count > 10_000 else { return }
-    let newest = generations.sorted { $0.value.generation > $1.value.generation }.prefix(5_000)
-    generations = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
+    let sorted = generations.sorted { $0.value.generation > $1.value.generation }
+    if let latestForgotten = sorted.dropFirst(5_000).map(\.value.at).max() {
+      forgottenUntil = max(forgottenUntil ?? latestForgotten, latestForgotten)
+    }
+    generations = Dictionary(uniqueKeysWithValues: sorted.prefix(5_000).map { ($0.key, $0.value) })
   }
 
   func generation(of customer: String?) -> (generation: UInt64, at: Date?) {
-    guard let customer, let kept = generations[customer] else { return (0, nil) }
+    guard let customer, let kept = generations[customer] else { return (0, forgottenUntil) }
     return (kept.generation, kept.at)
   }
 
