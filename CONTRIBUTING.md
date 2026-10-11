@@ -13,7 +13,7 @@ swift build
 
 | Command | What it does |
 | --- | --- |
-| `swift format lint --strict --recursive Sources Tests Plugins Package.swift` | lint and format check |
+| `scripts/lint.sh` | lint and format check, the same paths CI checks |
 | `swift format --in-place --recursive Sources Tests Plugins Package.swift` | format |
 | `swift build --build-tests -Xswiftc -warnings-as-errors` | build with warnings as errors |
 | `swift test --skip EntitlerIntegrationTests --enable-code-coverage` | unit tests |

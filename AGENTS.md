@@ -16,7 +16,7 @@
 Run every check in `ci.yml` locally:
 
 ```sh
-swift format lint --strict --recursive Sources Tests Plugins Package.swift
+scripts/lint.sh
 swift build --build-tests -Xswiftc -warnings-as-errors
 swift test --skip EntitlerIntegrationTests --enable-code-coverage
 swift test --sanitize=thread --skip EntitlerIntegrationTests
