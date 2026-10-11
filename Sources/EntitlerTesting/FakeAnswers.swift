@@ -212,6 +212,127 @@ public enum FakeAnswers {
     ])
   }
 
+  /// The catalogue's features, as `features()` answers them, from feature keys and their types.
+  public static func featureList(_ features: [String: FeatureType] = ["sso": .boolean]) -> Data {
+    let listed: [[String: Any]] = features.keys.sorted().map { key in
+      [
+        "id": "feature_\(key)", "key": key, "name": key.capitalized,
+        "type": features[key]!.rawValue, "description": "",
+        "unit": features[key] == .metered ? "credits" : "",
+        "resetEvery": features[key] == .metered
+          ? ["count": 1, "unit": "months"] as [String: Any] : NSNull(),
+        "archived": false, "includes": [String](),
+      ]
+    }
+    var object = context
+    object["experiment"] = nil
+    object["testers"] = nil
+    object["features"] = listed
+    return json(object)
+  }
+
+  /// A customer as lists and changes describe them.
+  public static func customerSummary(
+    id: String = "user_1", name: String = "Ada", email: String = "ada@example.com",
+    plan: String? = "free"
+  ) -> Data { json(customerSummaryObject(id: id, name: name, email: email, plan: plan)) }
+
+  /// A page of the customer list, with the customers given by external id.
+  public static func customerPage(customers: [String] = ["user_1"], next: String? = nil) -> Data {
+    json([
+      "items": customers.map { customerSummaryObject(id: $0, name: $0, email: "", plan: "free") },
+      "next": orNull(next),
+    ])
+  }
+
+  /// The customer in full, on their default plan with no subscription, grants or usage.
+  public static func customerDetail(id: String = "user_1") -> Data {
+    let free: [String: Any] = ["id": "plan_free", "key": "free", "name": "Free"]
+    return json([
+      "customer": customerSummaryObject(id: id, name: "Ada", email: "", plan: "free"),
+      "asOf": now, "subscription": NSNull(), "defaultPlan": free,
+      "products": [
+        ["product": ["key": "app", "name": "App"], "defaultPlan": free, "subscription": NSNull()]
+      ],
+      "addOns": [Any](), "entitlements": [Any](), "banked": [String: Any](),
+      "moveOptions": [Any](), "grants": [Any](), "usage": ["items": [Any](), "next": NSNull()],
+      "activity": [["text": "Registered", "at": now]],
+      "environment": ["id": "env_test", "name": "development", "kind": "test"],
+    ])
+  }
+
+  /// The customer's usage: one meter per feature key, with its allowance and amount used.
+  public static func customerUsage(
+    customer: String = "user_1", meters: [String: (value: FeatureValue, used: Int64)] = [:]
+  ) -> Data {
+    let features: [[String: Any]] = meters.keys.sorted().map { key in
+      let meter = meters[key]!
+      var object = entitlement(
+        key: key, entitled: true, value: meter.value, type: .metered, used: meter.used, held: 0,
+        upgrades: [])
+      object["feature"] = object.removeValue(forKey: "key")
+      object["upgrades"] = nil
+      return object
+    }
+    return json(
+      [
+        "customer": customer, "asOf": now, "metersStartAgainAt": NSNull(), "features": features,
+        "log": ["items": [Any](), "next": NSNull()],
+      ].merging(context) { $1 })
+  }
+
+  /// A signed snapshot, as `snapshot()` answers it. The token is not a real signature.
+  public static func issuedSnapshot(
+    token: String = "header.payload.signature", keyID: String = "key_1"
+  ) -> Data {
+    json([
+      "token": token, "expiresAt": instant(Date().addingTimeInterval(86_400)), "keyId": keyID,
+    ])
+  }
+
+  /// The public keys that verify snapshots, as `snapshotKeys()` answers them.
+  public static func snapshotKeys(_ keys: [JSONWebKey] = []) -> Data {
+    json([
+      "keys": keys.map { key in
+        [
+          "kty": key.kty, "crv": key.crv, "x": key.x, "y": key.y, "kid": key.kid,
+          "alg": key.alg, "use": key.use,
+        ]
+      }
+    ])
+  }
+
+  /// The scopes a key holds, as `scopes()` answers them.
+  public static func keyScopes(_ scopes: [Scope] = [.entitlementsRead], registration: Bool? = nil)
+    -> Data
+  {
+    json([
+      "id": "key_1", "scopes": scopes.map(\.rawValue), "registration": orNull(registration),
+    ])
+  }
+
+  /// A batch of usage events' answer, as the API sends it: one result per outcome, in order.
+  public static func usageBatch(_ outcomes: [UsageEventOutcome]) -> Data {
+    json([
+      "results": outcomes.enumerated().map { index, outcome in
+        [
+          "index": index, "outcome": outcome.rawValue,
+          "id": outcome == .error ? NSNull() : "usage_\(index + 1)" as Any, "late": false,
+          "error": outcome == .error
+            ? ["code": "invalid_amount", "message": "Refused."] as Any : NSNull(),
+        ] as [String: Any]
+      }
+    ])
+  }
+
+  /// The customer's billing with no provider, as `billing()` answers it.
+  public static func customerBilling() -> Data {
+    json([
+      "provider": NSNull(), "status": NSNull(), "sku": NSNull(), "items": 0, "drift": NSNull(),
+      "products": [Any](),
+    ])
+  }
+
   /// An error answer, as Entitler sends it with a non-2xx status.
   public static func error(code: ErrorCode, message: String) -> Data {
     json(["error": ["code": code.rawValue, "message": message]])
@@ -279,6 +400,22 @@ public enum FakeAnswers {
       "quantity": orNull(change.quantity), "effective": change.effective.rawValue,
       "at": instant(change.at), "until": orNull(change.until.map(instant)),
       "changed": change.changed,
+    ]
+  }
+
+  static func customerSummaryObject(id: String, name: String, email: String, plan: String?)
+    -> [String: Any]
+  {
+    let held: Any = orNull(
+      plan.map { ["id": "plan_\($0)", "key": $0, "name": $0.capitalized, "version": 1] })
+    return [
+      "id": "cus_\(id)", "externalId": id, "name": name, "email": email,
+      "environmentId": "env_test", "sample": false, "createdAt": now, "plan": held,
+      "plans": plan.map { [["id": "plan_\($0)", "key": $0, "name": $0.capitalized, "version": 1]] }
+        ?? [],
+      "defaultPlan": ["id": "plan_free", "key": "free", "name": "Free"], "status": "active",
+      "kind": "recurring", "metadata": [String: String](),
+      "track": ["id": "track_all", "name": "All customers"], "testCustomer": false,
     ]
   }
 

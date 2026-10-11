@@ -205,11 +205,25 @@ struct State {
       arguments["id"] = last
     }
     writes.append(FakeWrite(method: name, arguments: arguments, idempotencyKey: key))
-    if let key, let kept = keys["\(name) \(key)"] { return (200, kept, true) }
+    if let key, let kept = keys["\(name) \(key)"] { return (200, replay(name, of: kept), true) }
     let (status, answer, keep) =
       replaced[name].map { ($0.status, $0.body, true) } ?? write(name, segments, body)
     if keep, (200..<300).contains(status), let key { keys["\(name) \(key)"] = answer }
     return (status, answer, false)
+  }
+
+  func replay(_ name: String, of kept: Data) -> Data {
+    guard ["recordUsage", "holdUsage"].contains(name),
+      var object = (try? JSONSerialization.jsonObject(with: kept)) as? [String: Any]
+    else { return kept }
+    let hold = (object["holdId"] as? String).flatMap { holds[$0] }
+    object["outcome"] =
+      switch (name, hold?.settled, hold?.released) {
+      case ("holdUsage", .some, _): UsageOutcome.settled.rawValue
+      case ("holdUsage", _, true): UsageOutcome.released.rawValue
+      default: UsageOutcome.duplicate.rawValue
+      }
+    return FakeAnswers.json(object)
   }
 
   static func method(_ method: String, _ segments: [String]) -> String {
@@ -343,6 +357,14 @@ struct State {
     case "syncBilling": return (200, FakeAnswers.billingSync(), true)
     case "register": return (200, FakeAnswers.registeredCustomer(id: id, created: false), true)
     case "token": return (201, FakeAnswers.customerToken(customer: id), true)
+    case "snapshot": return (201, FakeAnswers.issuedSnapshot(), true)
+    case "update":
+      return (
+        200,
+        FakeAnswers.customerSummary(
+          id: id, name: body["name"] as? String ?? "Ada",
+          email: body["email"] as? String ?? "ada@example.com"), true
+      )
     case "setTrack":
       return (200, FakeAnswers.customerTrack(customer: id, track: body["track"] as? String), true)
     case "erase": return (204, Data(), true)

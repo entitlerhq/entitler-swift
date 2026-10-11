@@ -92,6 +92,67 @@ import Testing
     #expect(fake.writes.first?.idempotencyKey == "job")
   }
 
+  @Test func replaysAnswerAsTheAPIDoes() async throws {
+    let fake = FakeCustomer(["ai_credits": .metered(value: 100, used: 0)])
+    let customer = fake.customer
+    _ = try await customer.recordUsage(of: Self.credits, amount: 5, idempotencyKey: "r")
+    let replay = try await customer.recordUsage(of: Self.credits, amount: 5, idempotencyKey: "r")
+    #expect(replay.outcome == .duplicate)
+    #expect(replay.replayed)
+    #expect(try await customer.check(Self.credits).used == 5)
+
+    let first = try await customer.startHold(of: Self.credits, amount: 10, idempotencyKey: "h")
+    #expect(!first.isDuplicate)
+    let again = try await customer.startHold(of: Self.credits, amount: 10, idempotencyKey: "h")
+    #expect(again.isDuplicate)
+    #expect(again.id == first.id)
+    try await first.release()
+    await #expect(throws: EntitlerError.self) {
+      try await customer.startHold(of: Self.credits, amount: 10, idempotencyKey: "h")
+    }
+
+    let runs = Box(0)
+    for _ in 0..<2 {
+      _ = try? await customer.withHold(of: Self.credits, amount: 10, idempotencyKey: "w") { hold in
+        runs.with { $0 += 1 }
+        try hold.use(4)
+      }
+    }
+    #expect(runs.get == 1)
+    #expect(try await customer.check(Self.credits).used == 9)
+
+    try await customer.withHold(of: Self.credits, amount: 2, idempotencyKey: "x") { hold in
+      try hold.use(6)
+    }
+    #expect(try await customer.check(Self.credits).used == 15)
+  }
+
+  @Test func updateAndSnapshotAnswerAPlainSuccess() async throws {
+    let fake = FakeCustomer(["sso": true], id: "user_4")
+    let customer = fake.customer
+    let updated = try await customer.update(name: "Ada")
+    #expect(updated.externalID == "user_4")
+    let snapshot = try await customer.snapshot()
+    #expect(!snapshot.token.isEmpty)
+    #expect(fake.writes.map(\.method) == ["update", "snapshot"])
+  }
+
+  @Test func aBatchAnswerBuiltForTheTransportDecodes() async throws {
+    let api = FakeAPI { _ in
+      Reply(
+        status: 200, headers: ["Content-Type": "application/json"],
+        body: FakeAnswers.usageBatch([.recorded, .duplicate, .error]))
+    }
+    let feature = Feature<Metered>("ai_credits")
+    let result = try await api.run {
+      try await api.server().recordUsageBatch(
+        (0..<3).map {
+          UsageBatchEvent(customer: "u", feature: feature, amount: 1, idempotencyKey: "k\($0)")
+        })
+    }
+    #expect(result.results.map(\.outcome) == [.recorded, .duplicate, .error])
+  }
+
   @Test func otherWritesAnswerAPlainSuccessUnlessReplaced() async throws {
     let fake = FakeCustomer([:])
     let customer = fake.customer
@@ -192,6 +253,41 @@ import Testing
       try decoder.decode(CustomerTrack.self, from: FakeAnswers.customerTrack(track: "Beta")).track
         .name
         == "Beta")
+    #expect(
+      try decoder.decode(
+        FeatureList.self, from: FakeAnswers.featureList(["ai_credits": .metered, "sso": .boolean])
+      ).features.map(\.key) == ["ai_credits", "sso"])
+    #expect(
+      try decoder.decode(CustomerSummary.self, from: FakeAnswers.customerSummary(id: "u_2"))
+        .externalID == "u_2")
+    #expect(
+      try decoder.decode(
+        Page<CustomerSummary>.self,
+        from: FakeAnswers.customerPage(customers: ["a", "b"], next: "c")
+      ).next == "c")
+    #expect(
+      try decoder.decode(CustomerDetail.self, from: FakeAnswers.customerDetail(id: "u_3")).customer
+        .externalID == "u_3")
+    #expect(
+      try decoder.decode(
+        CustomerUsage.self,
+        from: FakeAnswers.customerUsage(meters: ["ai_credits": (.amount(100), 40)])
+      ).features.first?.remaining == .amount(60))
+    #expect(
+      try decoder.decode(IssuedSnapshot.self, from: FakeAnswers.issuedSnapshot(keyID: "k")).keyID
+        == "k")
+    let key = try decoder.decode(
+      JSONWebKey.self,
+      from: Data(
+        #"{"kty":"EC","crv":"P-256","x":"x","y":"y","kid":"k1","alg":"ES256","use":"sig"}"#.utf8))
+    #expect(
+      try decoder.decode(SnapshotKeys.self, from: FakeAnswers.snapshotKeys([key])).keys == [key])
+    #expect(
+      try decoder.decode(KeySelf.self, from: FakeAnswers.keyScopes([.usageWrite])).scopes == [
+        "usage:write"
+      ])
+    #expect(
+      try decoder.decode(CustomerBilling.self, from: FakeAnswers.customerBilling()).items == 0)
     let error =
       try JSONSerialization.jsonObject(
         with: FakeAnswers.error(code: .notSelfServe, message: "No.")) as? [String: [String: String]]
