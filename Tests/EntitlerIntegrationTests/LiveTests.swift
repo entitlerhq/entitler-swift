@@ -342,7 +342,7 @@ struct LiveTests {
       let period = try #require(
         plans.options.first { $0.plan.key == "pro_basic" }?.periods.first?.key)
       let basic = try await customer.setPlan(
-        to: "pro_basic", period: period, reason: "SDK test", actor: "sdk-swift-tests")
+        to: "pro_basic", period: period, when: .now, reason: "SDK test", actor: "sdk-swift-tests")
       #expect(basic.plan?.key == "pro_basic")
       let same = try await customer.setPlan(to: "pro_basic", period: period)
       #expect(!same.changed)
