@@ -19,8 +19,8 @@ All notable changes to this project are documented here. The format follows
   `subscribe` answering its next step, `cancel`, `undoPendingChange`, `billingPortal` and
   `syncBilling`.
 - Registration, details, `erase()`, tokens, tracks by name, per-call `asOf` reads and the company's
-  decisions on `ServerCustomer`: `setPlan` with billing modes and `until`, `setAddOn`, grants,
-  `adjustMeter` and `cancelUsage`.
+  decisions on `ServerCustomer`: `setPlan` with billing modes, `until`, `version` and ending a
+  plan, `setAddOn` with `replaces` and store SKUs, grants, `adjustMeter` and `cancelUsage`.
 - Usage batches with request keys derived from their events, pricing, the feature list, scopes and
   snapshot keys on the server.
 - Timeouts, retries with backoff, idempotency keys on every write with `replayed` on their answers,

@@ -1,6 +1,7 @@
 import Foundation
 
-/// A plan to move to: named by its key or public id, or replaced by a SKU the customer bought.
+/// A plan to move to: named by its key or public id, replaced by a SKU the customer bought, or none,
+/// ending the customer's plan in a product.
 ///
 /// A string literal names a plan: `try await customer.setPlan(to: "pro")`.
 public enum PlanChoice: Hashable, Sendable, ExpressibleByStringLiteral {
@@ -8,9 +9,18 @@ public enum PlanChoice: Hashable, Sendable, ExpressibleByStringLiteral {
   case plan(String)
   /// The SKU the customer bought, which names its own period.
   case sku(SKU)
+  /// No plan in the product with this key: the customer moves to its default plan, or holds no plan
+  /// when it has none.
+  case none(product: String)
 
   /// Names a plan by its key or public id.
   public init(stringLiteral value: String) { self = .plan(value) }
+}
+
+/// Which version of the plan held to move to.
+public enum PlanVersion: String, Codable, Hashable, Sendable {
+  /// The newest version, ending a grandfathered one; it takes effect now.
+  case latest
 }
 
 /// A product the customer bought from a connector: the connector and the provider's ids.
@@ -250,10 +260,14 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// Stripe, and is refused with ``ErrorCode/billedElsewhere`` when Stripe already bills that
   /// product. Charging through the provider can fail with ``ErrorCode/paymentRequired``.
   ///
+  /// Naming the plan the customer already holds undoes a change booked for renewal, and with
+  /// ``BillingMode/provider`` or ``BillingMode/end`` ends a ``BillingMode/keep`` exception.
+  ///
   /// - Parameters:
-  ///   - plan: The plan by its key or public id, or the SKU the customer bought (which names its
-  ///     own period).
-  ///   - period: The period's key, such as `yearly`.
+  ///   - plan: The plan by its key or public id, the SKU the customer bought (which names its
+  ///     own period), or ``PlanChoice/none(product:)`` to end the customer's plan in a product,
+  ///     with any `billing` but ``BillingMode/keep``.
+  ///   - period: The period's key, such as `yearly`. Never with ``PlanChoice/none(product:)``.
   ///   - when: ``ChangeTiming/now`` or ``ChangeTiming/end`` (at renewal); the project's policy
   ///     when left out.
   ///   - billing: ``BillingMode/provider`` (the API's default) charges through the provider that
@@ -261,7 +275,10 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   ///     billing; ``BillingMode/end`` ends the provider's subscription, as for an invoiced
   ///     contract.
   ///   - until: When the customer returns to the product's default plan, such as a store
-  ///     transaction's expiry, so a missed store notification ends the plan.
+  ///     transaction's expiry, so a missed store notification ends the plan. While Stripe bills
+  ///     the product it needs ``BillingMode/end``. Never with ``PlanChoice/none(product:)``.
+  ///   - version: ``PlanVersion/latest`` moves the customer now to the newest version of the plan
+  ///     they hold. Never with ``PlanChoice/none(product:)``.
   ///   - register: Registers a customer not registered yet.
   ///   - reason: Why, at most 200 characters, shown in the customer's activity.
   ///   - actor: The person or system that decided, 1 to 200 characters, such as a support agent's
@@ -272,27 +289,22 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   @discardableResult
   public func setPlan(
     to plan: PlanChoice, period: String? = nil, when: ChangeTiming? = nil,
-    billing: BillingMode? = nil, until: Date? = nil, register: Bool = false,
-    reason: String? = nil, actor: String? = nil, idempotencyKey: String? = nil,
-    timeout: TimeInterval? = nil
+    billing: BillingMode? = nil, until: Date? = nil, version: PlanVersion? = nil,
+    register: Bool = false, reason: String? = nil, actor: String? = nil,
+    idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> PlanChange {
-    struct Body: Encodable {
-      var plan: String?
-      var sku: SKU?
-      var period: String?
-      var when: ChangeTiming?
-      var billing: BillingMode?
-      var until: Date?
-      var register: Bool?
-      var reason: String?
-      var actor: String?
-    }
-    var body = Body(
-      period: period, when: when, billing: billing, until: until, register: register ? true : nil,
-      reason: reason, actor: actor)
+    var body = PlanBody(
+      period: period, when: when, billing: billing, until: until, version: version,
+      register: register ? true : nil, reason: reason, actor: actor)
     switch plan {
     case .plan(let key): body.plan = try require(key, Messages.plan)
     case .sku(let sku): body.sku = sku
+    case .none(let product):
+      body.product = try require(product, Messages.product)
+      guard period == nil, until == nil, version == nil else {
+        throw ArgumentError(message: Messages.endingPlan)
+      }
+      body.endsPlan = true
     }
     return try await handle.call(
       "PUT", ["plan"], body: body, idempotencyKey: idempotencyKey, timeout: timeout)
@@ -304,6 +316,8 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// - Parameters:
   ///   - addOn: The add-on, by its key or public id.
   ///   - quantity: From 0 to 10,000.
+  ///   - replaces: The add-on this one takes the place of, by its key or public id, swapped in one
+  ///     write as ``CustomerPlans`` lists a ``Move/replace`` move (quantity at least 1).
   ///   - sku: The App Store or Google Play SKU that sold the add-on, for a verified store
   ///     purchase: the store is recorded as its biller and Stripe is never charged. Fails with
   ///     `409 billed_elsewhere` when Stripe bills the product.
@@ -313,18 +327,22 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func setAddOn(
-    _ addOn: String, quantity: Int, sku: SKU? = nil, reason: String? = nil, actor: String? = nil,
-    idempotencyKey: String? = nil, timeout: TimeInterval? = nil
+    _ addOn: String, quantity: Int, replaces: String? = nil, sku: SKU? = nil,
+    reason: String? = nil, actor: String? = nil, idempotencyKey: String? = nil,
+    timeout: TimeInterval? = nil
   ) async throws -> PlanChange {
     struct Body: Encodable {
       var quantity: Int
       var sku: SKU?
+      var replaces: String?
       var reason: String?
       var actor: String?
     }
     return try await handle.call(
       "PUT", ["add-ons", require(addOn, Messages.plan)],
-      body: Body(quantity: quantity, sku: sku, reason: reason, actor: actor),
+      body: Body(
+        quantity: quantity, sku: sku, replaces: try replaces.map { try require($0, Messages.plan) },
+        reason: reason, actor: actor),
       idempotencyKey: idempotencyKey, timeout: timeout)
   }
 
@@ -471,4 +489,56 @@ struct Correction: Encodable {
   var actor: String?
 
   var orNil: Correction? { reason == nil && actor == nil ? nil : self }
+}
+
+struct PlanBody: Encodable {
+  var plan: String?
+  var sku: SKU?
+  var product: String?
+  var period: String?
+  var when: ChangeTiming?
+  var billing: BillingMode?
+  var until: Date?
+  var version: PlanVersion?
+  var register: Bool?
+  var reason: String?
+  var actor: String?
+  var endsPlan = false
+
+  enum CodingKeys: String, CodingKey {
+    case plan, sku, product, period, when, billing, until, version, register, reason, actor
+  }
+
+  init(
+    period: String?, when: ChangeTiming?, billing: BillingMode?, until: Date?,
+    version: PlanVersion?, register: Bool?, reason: String?, actor: String?
+  ) {
+    self.period = period
+    self.when = when
+    self.billing = billing
+    self.until = until
+    self.version = version
+    self.register = register
+    self.reason = reason
+    self.actor = actor
+  }
+
+  func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    if endsPlan {
+      try container.encodeNil(forKey: .plan)
+    } else {
+      try container.encodeIfPresent(plan, forKey: .plan)
+    }
+    try container.encodeIfPresent(sku, forKey: .sku)
+    try container.encodeIfPresent(product, forKey: .product)
+    try container.encodeIfPresent(period, forKey: .period)
+    try container.encodeIfPresent(when, forKey: .when)
+    try container.encodeIfPresent(billing, forKey: .billing)
+    try container.encodeIfPresent(until, forKey: .until)
+    try container.encodeIfPresent(version, forKey: .version)
+    try container.encodeIfPresent(register, forKey: .register)
+    try container.encodeIfPresent(reason, forKey: .reason)
+    try container.encodeIfPresent(actor, forKey: .actor)
+  }
 }

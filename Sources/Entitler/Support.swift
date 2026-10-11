@@ -197,6 +197,8 @@ enum Messages {
   static let customerToken = "Provide a customer token minted by your server."
   static let customerID = "Provide the id your app uses for the customer."
   static let plan = "Name the plan by its id or its key."
+  static let product = "Name the product by its key."
+  static let endingPlan = "Pass no period, until or version when ending a plan."
   static let feature = "Name the feature by its key."
   static let grant = "Provide the id of the grant."
   static let hold = "Provide the id of the hold."

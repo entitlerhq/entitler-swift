@@ -181,6 +181,52 @@ import Testing
     }
   }
 
+  @Test func setPlanEndsAPlanOrMovesToTheLatestVersion() async throws {
+    let api = FakeAPI { _ in .json(Fixture.planChange()) }
+    let customer = try api.server().customer("u")
+    try await api.run {
+      try await customer.setPlan(
+        to: .none(product: "app"), when: .end, billing: .end, reason: "Churned")
+      let ended = try #require(api.last.json)
+      #expect(ended.keys.sorted() == ["billing", "plan", "product", "reason", "when"])
+      #expect(ended["plan"] is NSNull)
+      #expect(ended["product"] as? String == "app")
+      try await customer.setPlan(to: "pro", version: .latest)
+      #expect(api.last.json?.keys.sorted() == ["plan", "version"])
+      #expect(api.last.json?["version"] as? String == "latest")
+      #expect(api.count == 2)
+      await #expect(throws: ArgumentError(message: "Name the product by its key.")) {
+        try await customer.setPlan(to: .none(product: " "))
+      }
+      let ending = ArgumentError(message: "Pass no period, until or version when ending a plan.")
+      await #expect(throws: ending) {
+        try await customer.setPlan(to: .none(product: "app"), period: "monthly")
+      }
+      await #expect(throws: ending) {
+        try await customer.setPlan(to: .none(product: "app"), until: Date())
+      }
+      await #expect(throws: ending) {
+        try await customer.setPlan(to: .none(product: "app"), version: .latest)
+      }
+      #expect(api.count == 2)
+    }
+  }
+
+  @Test func setAddOnReplacesAnotherInOneWrite() async throws {
+    let api = FakeAPI { _ in .json(Fixture.planChange()) }
+    let customer = try api.server().customer("u")
+    try await api.run {
+      try await customer.setAddOn("support_premium", quantity: 1, replaces: "support_standard")
+      #expect(api.last.path == "/customers/u/add-ons/support_premium")
+      #expect(api.last.json?.keys.sorted() == ["quantity", "replaces"])
+      #expect(api.last.json?["replaces"] as? String == "support_standard")
+      await #expect(throws: ArgumentError(message: "Name the plan by its id or its key.")) {
+        try await customer.setAddOn("support_premium", quantity: 1, replaces: "")
+      }
+      #expect(api.count == 1)
+    }
+  }
+
   @Test func setAddOnSetsAQuantity() async throws {
     let api = FakeAPI { _ in .json(Fixture.planChange()) }
     let customer = try api.server().customer("u")

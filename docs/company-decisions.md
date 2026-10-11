@@ -25,9 +25,23 @@ try await customer.setPlan(
   Enterprise is that one write.
 - `when: .now` or `.end` (at renewal); the project's policy when left out.
 - `until:` returns the customer to the product's default plan at that instant, unless a later
-  `setPlan` moves them or sets a later `until`.
+  `setPlan` moves them or sets a later `until`. While Stripe bills the product it needs
+  `billing: .end`.
+- `version: .latest` moves the customer now to the newest version of the plan they hold, ending a
+  grandfathered version.
 - The plan the customer already holds, with the same period, billing and `until`, answers
-  `changed` false, so a redelivered webhook is harmless even with a fresh key.
+  `changed` false, so a redelivered webhook is harmless even with a fresh key. Naming it undoes a
+  change booked for renewal, and with `billing: .provider` or `.end` ends a `.keep` exception.
+
+End the customer's plan in a product with `.none(product:)`, the product's key. They move to the
+product's default plan, or hold no plan when it has none, now or at renewal, with any `billing` but
+`.keep`. Ending a plan takes no `period`, `until` or `version`:
+
+```swift
+try await customer.setPlan(
+  to: .none(product: "app"), when: .end, billing: .end, reason: "Contract ended",
+  actor: "hubspot", idempotencyKey: "deal-\(jobID)-lost")
+```
 - Charging through the provider can fail with `402 payment_required`, whose `payment` says whether
   the card was declined or needs the customer to act.
 
@@ -36,11 +50,14 @@ try await customer.setPlan(
 ```swift
 try await customer.setAddOn("extra_seats", quantity: 150, actor: "salesforce")
 try await customer.setAddOn("extra_seats", quantity: 0)
+try await customer.setAddOn("support_premium", quantity: 1, replaces: "support_standard")
 ```
 
 `setAddOn` adds the add-on when the customer holds none, sets its quantity when they do, and
 removes it at 0 (quantity 0 to 10,000). The change always takes effect now: an add-on change
-cannot be booked for renewal. An add-on bought in the App Store or Google Play passes its `sku`:
+cannot be booked for renewal, and naming the quantity held undoes a move booked for renewal.
+`replaces:` names the add-on this one takes the place of, swapped in one write, as `plans()` lists a
+`replace` move. An add-on bought in the App Store or Google Play passes its `sku`:
 see [store purchases](store-purchases.md).
 
 ## Grants

@@ -1071,8 +1071,8 @@ public struct GrantChange: Codable, Hashable, Sendable, Replaying {
 
 /// What a plan change did, as ``Customer/cancel(addOn:product:idempotencyKey:timeout:)``,
 /// ``Customer/undoPendingChange(addOn:product:idempotencyKey:timeout:)``,
-/// ``ServerCustomer/setPlan(to:period:when:billing:until:register:reason:actor:idempotencyKey:timeout:)``
-/// and ``ServerCustomer/setAddOn(_:quantity:sku:reason:actor:idempotencyKey:timeout:)`` answer,
+/// ``ServerCustomer/setPlan(to:period:when:billing:until:version:register:reason:actor:idempotencyKey:timeout:)``
+/// and ``ServerCustomer/setAddOn(_:quantity:replaces:sku:reason:actor:idempotencyKey:timeout:)`` answer,
 /// and a ``SubscribeStep/done(_:)`` step holds.
 public struct PlanChange: Codable, Hashable, Sendable, Replaying {
   /// The product the change is in.
