@@ -388,6 +388,7 @@ import Testing
 
   @Test func aFailedRefreshWhoseOnlyWaiterLeftIsNotReused() async throws {
     let calls = Box(0)
+    let failed = Box(false)
     let api = FakeAPI { _ in .json(Fixture.check()) }
     let client = try EntitlerClient(
       tokenProvider: {
@@ -397,6 +398,7 @@ import Testing
         }
         if n == 1 {
           try? await Task.sleep(nanoseconds: 100_000_000)
+          failed.with { $0 = true }
           throw URLError(.timedOut)
         }
         return makeJWT(["sub": "u"])
@@ -405,11 +407,16 @@ import Testing
     let cancelled = Task {
       try await Hooks.$current.withValue(hooks) { try await client.me.check("sso") }
     }
-    try await Task.sleep(nanoseconds: 20_000_000)
+    while calls.get == 0 { await Task.yield() }
     cancelled.cancel()
     _ = await cancelled.result
-    try await Task.sleep(nanoseconds: 200_000_000)
-    #expect(try await api.run { try await client.me.check("sso") }.entitled)
+    while !failed.get { try await Task.sleep(nanoseconds: 5_000_000) }
+    var answered = false
+    for _ in 0..<400 where !answered {
+      answered = (try? await api.run { try await client.me.check("sso") }) != nil
+      if !answered { try await Task.sleep(nanoseconds: 5_000_000) }
+    }
+    #expect(answered)
     #expect(calls.get == 2)
   }
 

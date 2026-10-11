@@ -67,7 +67,10 @@ actor TokenSource {
   private func started(timeout: TimeInterval) -> Task<String, any Error> {
     let task = start(timeout: timeout)
     refreshing = task
-    Task { await self.settle(task, outcome: await task.result) }
+    Task {
+      let outcome = await task.result
+      settle(task, outcome: outcome)
+    }
     return task
   }
 
