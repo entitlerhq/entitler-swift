@@ -92,7 +92,7 @@ jobs:
         if: ${{ matrix.simulators }}
         run: |
           device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')
-          xcodebuild test -scheme Entitler-Package -destination "id=$device" -skip-testing:EntitlerIntegrationTests -quiet
+          xcodebuild test -scheme Entitler-Package -destination "id=$device" -skip-testing:EntitlerIntegrationTests
       - name: Build for tvOS, watchOS and visionOS
         if: ${{ matrix.simulators }}
         run: |
