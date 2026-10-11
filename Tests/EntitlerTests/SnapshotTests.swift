@@ -273,6 +273,19 @@ extension JSONWebKey {
     }
   }
 
+  @Test func anInvalidNowIsAnArgumentError() {
+    let signer = Signer()
+    for now in [
+      Date(timeIntervalSince1970: .nan), Date(timeIntervalSince1970: .infinity),
+      Date(timeIntervalSince1970: 1e15),
+    ] {
+      #expect(throws: ArgumentError(message: "Pass now as a valid instant.")) {
+        try verifySnapshot(
+          signer.sign(claims: Self.claims()), expecting: expectation(signer, now: now))
+      }
+    }
+  }
+
   @Test func usesTheSystemClockByDefault() {
     let signer = Signer()
     let expected = SnapshotExpectation(keys: [signer.jwk], customer: "user_1", environment: "env_1")

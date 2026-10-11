@@ -103,11 +103,16 @@ actor ClientState {
     counter += 1
     generations[customer] = (counter, now)
     guard generations.count > 10_000 else { return }
-    let sorted = generations.sorted { $0.value.generation > $1.value.generation }
-    if let latestForgotten = sorted.dropFirst(5_000).map(\.value.at).max() {
-      forgottenUntil = max(forgottenUntil ?? latestForgotten, latestForgotten)
+    let oldestKept = counter - 5_000
+    var kept: [String: (generation: UInt64, at: Date)] = [:]
+    for (customer, entry) in generations {
+      if entry.generation > oldestKept {
+        kept[customer] = entry
+      } else {
+        forgottenUntil = max(forgottenUntil ?? entry.at, entry.at)
+      }
     }
-    generations = Dictionary(uniqueKeysWithValues: sorted.prefix(5_000).map { ($0.key, $0.value) })
+    generations = kept
   }
 
   func generation(of customer: String?) -> (generation: UInt64, at: Date?) {
@@ -241,10 +246,12 @@ final class Core: Sendable, CustomReflectable {
   }
 
   func call<Answer: Decodable & Sendable>(_ request: Request) async throws -> Answer {
-    try await guarded { [self] in try decode(await send(request)) }
+    _ = try request.timeout.map(validTimeout)
+    return try await guarded { [self] in try decode(await send(request)) }
   }
 
   func callWithoutAnswer(_ request: Request) async throws {
+    _ = try request.timeout.map(validTimeout)
     try await guarded { [self] in _ = try await send(request) }
   }
 
@@ -269,6 +276,7 @@ final class Core: Sendable, CustomReflectable {
 
   func cachedCall<Answer: Decodable & Sendable>(_ request: Request) async throws -> Answer {
     guard let cache else { return try await call(request) }
+    _ = try request.timeout.map(validTimeout)
     return try await guarded { [self] in try await cachedAnswer(request, cache: cache) }
   }
 
@@ -338,7 +346,8 @@ final class Core: Sendable, CustomReflectable {
       return answer
     } catch let error as EntitlerError where error.isUnreachable && !error.isTokenError {
       let retryAfter = error.apiError?.retryAfter ?? 0
-      await state.unreachable(until: hooks.now().addingTimeInterval(max(30, retryAfter)))
+      let window = min(max(30, retryAfter), options.staleFor, 86_400 * 365)
+      await state.unreachable(until: hooks.now().addingTimeInterval(window))
       let sameToken = request.authenticated ? await keptToken() == token : true
       guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor, sameToken
       else {
@@ -437,6 +446,7 @@ final class Core: Sendable, CustomReflectable {
         var response = Response(http, body: body, now: hooks.now())
         response.idempotencyKey = idempotencyKey
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
+          await state.reachable()
           if isSignedIn, let named = try? JSON.decoder().decode(Named.self, from: body) {
             await state.setSignedInID(named.customer)
           }

@@ -142,6 +142,13 @@ func verifiedSnapshot(_ token: String, expecting expected: SnapshotExpectation) 
   guard (0...300).contains(expected.clockSkewSeconds) else {
     throw ArgumentError(message: "Pass clockSkewSeconds as a whole number from 0 to 300.")
   }
+  let instants = -62_135_596_800...253_402_300_799 as ClosedRange<Int64>
+  if let now = expected.now {
+    let seconds = now.timeIntervalSince1970
+    guard seconds.isFinite, instants.contains(Int64(seconds.rounded(.down))) else {
+      throw ArgumentError(message: "Pass now as a valid instant.")
+    }
+  }
   func fail(_ code: SnapshotError.Code = .invalid, _ message: String) -> EntitlerError {
     .snapshot(SnapshotError(code: code, message: message))
   }
@@ -176,7 +183,6 @@ func verifiedSnapshot(_ token: String, expecting expected: SnapshotExpectation) 
     fields.keys.contains("release"), fields.keys.contains("change"),
     claims.entitlements.allSatisfy(\.hasValidShape)
   else { throw malformed }
-  let instants = -62_135_596_800...253_402_300_799 as ClosedRange<Int64>
   guard instants.contains(claims.iat), instants.contains(claims.exp) else { throw malformed }
   guard claims.iss == expected.issuer else {
     throw fail(.invalid, "This snapshot was not issued by \(expected.issuer).")

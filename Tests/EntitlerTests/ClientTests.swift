@@ -81,6 +81,24 @@ import Testing
     #expect(api.count == 0)
   }
 
+  @Test func aTimeoutIsCheckedBeforeTheProviderRuns() async throws {
+    let calls = Box(0)
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let client = try EntitlerClient(
+      tokenProvider: {
+        calls.with { $0 += 1 }
+        return makeJWT(["sub": "u"])
+      }, options: api.options())
+    await #expect(throws: ArgumentError(message: Messages.timeout)) {
+      try await api.run { try await client.me.check("sso", timeout: 0) }
+    }
+    await #expect(throws: ArgumentError(message: Messages.timeout)) {
+      try await api.run { try await client.me.cancel(timeout: -1) }
+    }
+    #expect(calls.get == 0)
+    #expect(api.count == 0)
+  }
+
   @Test func overlongWaitsSleepWithoutTrapping() async throws {
     for wait in [TimeInterval.infinity, 1.9e10, 1e300] {
       let sleeping = Task { try await Hooks().sleep(wait) }
@@ -230,7 +248,7 @@ import Testing
       switch request.path {
       case "/keys/self":
         .json(
-          #"{"id":"k","scopes":["usage:write","plans:read","plans:publish","tracks:assign"],"registration":true}"#
+          #"{"id":"k","name":"Key","kind":"publishable","orgId":"o","projectId":"p","environmentId":"e","allowedOrigins":[],"createdAt":"2026-10-01T00:00:00Z","revokedAt":null,"scopes":["usage:write","plans:read","plans:publish","tracks:assign"],"registration":true}"#
         )
       case "/customers/snapshot-keys":
         .json(
@@ -275,17 +293,25 @@ import Testing
 
 @Suite struct ErrorTests {
   @Test func everyNamedCodeIsKnown() throws {
+    let tests = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent()
     let source = try String(
-      contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        .appendingPathComponent("../../Sources/Entitler/Errors.swift"), encoding: .utf8)
+      contentsOf: tests.appendingPathComponent("../Sources/Entitler/Errors.swift"), encoding: .utf8)
     let named = source.components(separatedBy: "ErrorCode(rawValue: \"").dropFirst()
       .map { String($0.prefix { $0 != "\"" }) }
-    #expect(named.count > 60)
     #expect(Set(ErrorCode.all.map(\.rawValue)) == Set(named))
     #expect(ErrorCode.all.count == named.count)
-    #expect(named.allSatisfy { ErrorCode(rawValue: $0).isKnown })
+    let frozen =
+      try JSONSerialization.jsonObject(
+        with: Data(contentsOf: tests.appendingPathComponent("Fixtures/error-codes.json")))
+      as! [String: Any]
+    let documented = (frozen["customers"] as! [String]) + (frozen["keys"] as! [String])
+    #expect(documented.count > 60)
+    for code in documented {
+      #expect(ErrorCode(rawValue: code).isKnown, "\(code) has no constant")
+    }
     #expect(ErrorCode.internal.isKnown)
-    #expect(ErrorCode.snapshotKeyUnavailable.rawValue == "snapshot_key_unavailable")
+    #expect(ErrorCode.snapshotKeyUnavailable.isKnown)
     #expect(!ErrorCode(rawValue: "brand_new").isKnown)
   }
 

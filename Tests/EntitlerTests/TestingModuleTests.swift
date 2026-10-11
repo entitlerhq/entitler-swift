@@ -127,6 +127,41 @@ import Testing
     #expect(try await customer.check(Self.credits).used == 15)
   }
 
+  @Test func settlingMoreThanTheHoldIsAnInvalidBody() async throws {
+    let fake = FakeCustomer(["ai_credits": .metered(value: 100, used: 0)])
+    let customer = fake.customer
+    let hold = try await customer.holdUsage(of: Self.credits, amount: 5, idempotencyKey: "h")
+    do {
+      _ = try await customer.settleUsage(hold: try #require(hold.holdID), amount: 6)
+      Issue.record("Expected invalid_body")
+    } catch EntitlerError.api(let error) {
+      #expect(error.status == 400)
+      #expect(error.code == .invalidBody)
+    }
+  }
+
+  @Test func theUsageLogAndOtherReadsAnswerCompleteBodies() async throws {
+    let fake = FakeCustomer(["ai_credits": .metered(value: 100, used: 0)], id: "user_7")
+    let customer = fake.customer
+    let first = try await customer.recordUsage(of: Self.credits, amount: 5, idempotencyKey: "a")
+    _ = try await customer.recordUsage(of: Self.credits, amount: 3, idempotencyKey: "b")
+    _ = try await customer.adjustMeter(Self.credits, to: 20, idempotencyKey: "c")
+    _ = try await customer.cancelUsage(id: try #require(first.id))
+    let usage = try await customer.usage()
+    #expect(usage.customer == "user_7")
+    #expect(usage.features.first?.feature == "ai_credits")
+    #expect(usage.log.items.map(\.kind) == [.adjust, .use, .use])
+    #expect(usage.log.items.last?.cancelledAt != nil)
+    #expect(usage.log.items.first?.setTo == 20)
+    var logged = 0
+    for try await _ in customer.usageLog() { logged += 1 }
+    #expect(logged == 3)
+    let details = try await customer.details()
+    #expect(details.customer.externalID == "user_7")
+    #expect(details.usage.items.count == 3)
+    #expect(try await customer.billing().items == 0)
+  }
+
   @Test func updateAndSnapshotAnswerAPlainSuccess() async throws {
     let fake = FakeCustomer(["sso": true], id: "user_4")
     let customer = fake.customer

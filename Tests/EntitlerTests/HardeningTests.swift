@@ -703,6 +703,29 @@ import Testing
     #expect(page?.used == 3)
   }
 
+  @Test func theCredentialsOwnAnswerIsReadInFull() throws {
+    let key: [String: Any] = [
+      "id": "k", "name": "Server", "kind": "secret", "orgId": "o", "projectId": "p",
+      "environmentId": NSNull(), "scopes": ["entitlements:read"], "allowedOrigins": [String](),
+      "createdAt": "2026-10-01T00:00:00Z", "revokedAt": NSNull(),
+    ]
+    let token: [String: Any] = [
+      "customer": "u", "scopes": ["entitlements:read"], "expiresAt": "2026-10-11T00:00:00Z",
+    ]
+    #expect(decodes(KeySelf.self, key)?.scopes == ["entitlements:read"])
+    #expect(decodes(KeySelf.self, token)?.scopes == ["entitlements:read"])
+    for field in key.keys {
+      var missing = key
+      missing[field] = nil
+      #expect(decodes(KeySelf.self, missing) == nil, "KeySelf without \(field)")
+    }
+    for field in token.keys where field != "scopes" {
+      var missing = token
+      missing[field] = nil
+      #expect(decodes(KeySelf.self, missing) == nil, "CustomerTokenSelf without \(field)")
+    }
+  }
+
   @Test func aBatchResultMissingAFieldIsAnInvalidResponse() async throws {
     let api = FakeAPI { _ in
       .json(#"{"results":[{"index":0,"outcome":"recorded","late":false,"error":null}]}"#)

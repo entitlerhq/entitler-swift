@@ -352,5 +352,13 @@ let sampleCatalogue = [
     (code, lines) = await run(["generate", "--base-url", "https://\(api.host)"], api: api)
     #expect(code == 1)
     #expect(lines.first?.hasPrefix("Entitler request failed: ") == true)
+    #expect(lines.first?.hasSuffix(" (connection_failed).") == true)
+    (code, lines) = await run(["generate", "--key", "ent_pk_test_1"], api: api)
+    #expect(code == 1)
+    #expect(lines == [Messages.publishableOnServer])
+    (code, lines) = await run(
+      ["snapshot-keys", "--base-url", "https://\(api.host)"], api: api)
+    #expect(code == 1)
+    #expect(lines.first?.hasSuffix(" (connection_failed).") == true)
   }
 }

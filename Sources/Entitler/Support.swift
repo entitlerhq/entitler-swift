@@ -64,6 +64,31 @@ public struct CredentialScopes: Hashable, Sendable {
 struct KeySelf: Decodable {
   let scopes: [String]
   let registration: Bool?
+
+  enum CodingKeys: String, CodingKey {
+    case id, name, kind, orgId, projectId, environmentId, scopes, allowedOrigins, createdAt
+    case revokedAt, registration, customer, expiresAt
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    scopes = try container.decode([String].self, forKey: .scopes)
+    registration = try container.decodeIfPresent(Bool.self, forKey: .registration)
+    if container.contains(.customer) {
+      _ = try container.decode(String.self, forKey: .customer)
+      _ = try container.decode(Date.self, forKey: .expiresAt)
+      return
+    }
+    for key in [CodingKeys.id, .name, .kind, .orgId] {
+      _ = try container.decode(String.self, forKey: key)
+    }
+    for key in [CodingKeys.projectId, .environmentId] {
+      _ = try container.decode(String?.self, forKey: key)
+    }
+    _ = try container.decode([String].self, forKey: .allowedOrigins)
+    _ = try container.decode(Date.self, forKey: .createdAt)
+    _ = try container.decode(Date?.self, forKey: .revokedAt)
+  }
 }
 
 protocol StaleMarking {

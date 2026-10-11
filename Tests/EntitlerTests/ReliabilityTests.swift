@@ -423,6 +423,48 @@ import Testing
     #expect(api.count == afterOutage + 2)
   }
 
+  @Test func anOutageNeverOutlastsStaleFor() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]),
+      .error(503, code: "unavailable", headers: ["Retry-After": "999999999"]),
+      .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let server = try api.server {
+      $0.maxRetries = 0
+      $0.staleFor = 100
+    }
+    let customer = try server.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+    }
+    #expect(
+      await server.core.state.outageAnswer(at: api.clock.get.addingTimeInterval(99)) == .serveKept)
+    #expect(
+      await server.core.state.outageAnswer(at: api.clock.get.addingTimeInterval(101)) == .probe)
+    await server.core.state.endProbe()
+    api.advance(101)
+    let recovered = try await api.run { try await customer.check("sso", revalidate: true) }
+    #expect(!recovered.stale)
+    #expect(api.count == 3)
+  }
+
+  @Test func anySuccessfulAnswerEndsTheOutage() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+      .json(Fixture.planChange()), .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+      _ = try await customer.cancel()
+      let fresh = try await customer.check("sso")
+      #expect(!fresh.stale)
+    }
+    #expect(api.count == 4)
+  }
+
   @Test func otherFailuresAreNotHiddenByStaleAnswers() async throws {
     let api = FakeAPI(replies: [
       .json(Fixture.check(), headers: ["ETag": "\"e\""]), .error(403, code: "scope_required"),
@@ -620,7 +662,9 @@ import Testing
   @Test func identityClientsSendKeyAndToken() async throws {
     let api = FakeAPI { request in
       request.path == "/keys/self"
-        ? .json(#"{"scopes":["customers:register","entitlements:read"],"registration":false}"#)
+        ? .json(
+          #"{"id":"k","name":"Key","kind":"publishable","orgId":"o","projectId":"p","environmentId":"e","allowedOrigins":[],"createdAt":"2026-10-01T00:00:00Z","revokedAt":null,"scopes":["customers:register","entitlements:read"],"registration":false}"#
+        )
         : request.path == "/customers/snapshot-keys"
           ? .json(#"{"keys":[]}"#)
           : .json(

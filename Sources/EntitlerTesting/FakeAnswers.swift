@@ -247,8 +247,12 @@ public enum FakeAnswers {
 
   /// The customer in full, on their default plan with no subscription, grants or usage.
   public static func customerDetail(id: String = "user_1") -> Data {
+    json(customerDetailObject(id: id))
+  }
+
+  static func customerDetailObject(id: String) -> [String: Any] {
     let free: [String: Any] = ["id": "plan_free", "key": "free", "name": "Free"]
-    return json([
+    return [
       "customer": customerSummaryObject(id: id, name: "Ada", email: "", plan: "free"),
       "asOf": now, "subscription": NSNull(), "defaultPlan": free,
       "products": [
@@ -260,27 +264,35 @@ public enum FakeAnswers {
         ["text": "Registered", "at": now, "by": NSNull(), "actor": NSNull(), "reason": NSNull()]
       ],
       "environment": ["id": "env_test", "name": "development", "kind": "test"],
-    ])
+    ]
   }
 
   /// The customer's usage: one meter per feature key, with its allowance and amount used.
   public static func customerUsage(
     customer: String = "user_1", meters: [String: (value: FeatureValue, used: Int64)] = [:]
   ) -> Data {
+    json(
+      customerUsageObject(
+        customer: customer, meters: meters.mapValues { ($0.value, $0.used, 0) }, log: []))
+  }
+
+  static func customerUsageObject(
+    customer: String, meters: [String: (value: FeatureValue, used: Int64, held: Int64)],
+    log: [[String: Any]]
+  ) -> [String: Any] {
     let features: [[String: Any]] = meters.keys.sorted().map { key in
       let meter = meters[key]!
       var object = entitlement(
-        key: key, entitled: true, value: meter.value, type: .metered, used: meter.used, held: 0,
-        upgrades: [])
+        key: key, entitled: true, value: meter.value, type: .metered, used: meter.used,
+        held: meter.held, upgrades: [])
       object["feature"] = object.removeValue(forKey: "key")
       object["upgrades"] = nil
       return object
     }
-    return json(
-      [
-        "customer": customer, "asOf": now, "metersStartAgainAt": NSNull(), "features": features,
-        "log": ["items": [Any](), "next": NSNull()],
-      ].merging(context) { $1 })
+    return [
+      "customer": customer, "asOf": now, "metersStartAgainAt": NSNull(), "features": features,
+      "log": ["items": log, "next": NSNull()] as [String: Any],
+    ].merging(context) { $1 }
   }
 
   /// A signed snapshot, as `snapshot()` answers it. The token is not a real signature.
@@ -308,9 +320,16 @@ public enum FakeAnswers {
   public static func keyScopes(_ scopes: [Scope] = [.entitlementsRead], registration: Bool? = nil)
     -> Data
   {
-    json([
-      "id": "key_1", "scopes": scopes.map(\.rawValue), "registration": orNull(registration),
-    ])
+    var object: [String: Any] = [
+      "id": "key_1", "name": "Test key", "kind": "secret", "orgId": "org_1",
+      "projectId": "project_1", "environmentId": "env_test", "scopes": scopes.map(\.rawValue),
+      "allowedOrigins": [String](), "createdAt": now, "revokedAt": NSNull(),
+    ]
+    if let registration {
+      object["kind"] = "publishable"
+      object["registration"] = registration
+    }
+    return json(object)
   }
 
   /// A batch of usage events' answer, as the API sends it: one result per outcome, in order.

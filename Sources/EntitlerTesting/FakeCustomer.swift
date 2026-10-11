@@ -146,6 +146,23 @@ struct State {
     var held: Int64 = 0
   }
 
+  struct LogEntry {
+    let id: String
+    let feature: String
+    let amount: Int64
+    let setTo: Int64?
+    var cancelled = false
+
+    var object: [String: Any] {
+      [
+        "id": id, "feature": feature, "amount": amount, "kind": setTo == nil ? "use" : "adjust",
+        "setTo": FakeAnswers.orNull(setTo), "source": "api", "by": "Test key",
+        "actor": NSNull(), "reason": NSNull(), "at": FakeAnswers.now,
+        "cancelledAt": cancelled ? FakeAnswers.now : NSNull(),
+      ]
+    }
+  }
+
   struct HoldRecord {
     let feature: String
     let amount: Int64
@@ -160,6 +177,7 @@ struct State {
   var meters: [String: Meter] = [:]
   var holds: [String: HoldRecord] = [:]
   var reports: [String: (feature: String, amount: Int64)] = [:]
+  var log: [LogEntry] = []
   var keys: [String: Data] = [:]
   var writes: [FakeWrite] = []
   var replaced: [String: (status: Int, body: Data)] = [:]
@@ -293,6 +311,24 @@ struct State {
       )
     case "plans": return (200, plans, false)
     case "pricing": return (200, pricing, false)
+    case "usage":
+      return (
+        200,
+        FakeAnswers.json(
+          FakeAnswers.customerUsageObject(
+            customer: id,
+            meters: meters.mapValues {
+              (
+                value: $0.allowance.map(FeatureValue.amount) ?? .unlimited, used: $0.used,
+                held: $0.held
+              )
+            }, log: log.reversed().map(\.object))), false
+      )
+    case nil:
+      var detail = FakeAnswers.customerDetailObject(id: id)
+      detail["usage"] = ["items": log.reversed().map(\.object), "next": NSNull()] as [String: Any]
+      return (200, FakeAnswers.json(detail), false)
+    case "billing": return (200, FakeAnswers.customerBilling(), false)
     default:
       return (
         404, FakeAnswers.error(code: .notFound, message: "This fake customer has no answer here."),
@@ -414,6 +450,7 @@ struct State {
     meters[feature]!.used += amount
     counter += 1
     reports["usage_\(counter)"] = (feature, amount)
+    log.append(LogEntry(id: "usage_\(counter)", feature: feature, amount: amount, setTo: nil))
     return (
       201,
       usage(
@@ -458,7 +495,7 @@ struct State {
       return (
         400,
         FakeAnswers.error(
-          code: .invalidAmount, message: "Settle at most the held amount, \(hold.amount)."),
+          code: .invalidBody, message: "Settle at most the held amount, \(hold.amount)."),
         false
       )
     }
@@ -466,6 +503,11 @@ struct State {
     holds[id] = hold
     meters[hold.feature]!.held -= hold.amount
     meters[hold.feature]!.used += amount
+    if amount > 0 {
+      counter += 1
+      log.append(
+        LogEntry(id: "usage_\(counter)", feature: hold.feature, amount: amount, setTo: nil))
+    }
     return (200, usage(hold.feature, outcome: .settled, amount: amount, holdID: id), true)
   }
 
@@ -490,6 +532,12 @@ struct State {
     meters[feature]!.used = max(0, to ?? before + (by ?? 0))
     let change = meters[feature]!.used - before
     counter += 1
+    if change != 0 {
+      log.append(
+        LogEntry(
+          id: "usage_\(counter)", feature: feature, amount: change,
+          setTo: meters[feature]!.used))
+    }
     return (
       200,
       usage(
@@ -505,6 +553,7 @@ struct State {
         false
       )
     }
+    if let index = log.firstIndex(where: { $0.id == id }) { log[index].cancelled = true }
     if var meter = meters[report.feature] {
       meter.used = max(0, meter.used - report.amount)
       meters[report.feature] = meter

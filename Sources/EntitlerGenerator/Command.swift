@@ -173,10 +173,16 @@ public enum GeneratorCommand {
   }
 
   private static func failure(_ error: any Error) -> String {
-    if case EntitlerError.api(let error) = error {
-      return "Entitler request failed: \(withoutFullStop(error.message)) (\(error.code))."
+    switch error {
+    case EntitlerError.api(let error):
+      "Entitler request failed: \(withoutFullStop(error.message)) (\(error.code))."
+    case EntitlerError.timeout(let error):
+      "Entitler request failed: \(withoutFullStop(error.message)) (\(ErrorCode.timedOut))."
+    case EntitlerError.connection(let error):
+      "Entitler request failed: \(withoutFullStop(error.message)) (\(ErrorCode.connectionFailed))."
+    case let error as ArgumentError: error.message
+    default: error.localizedDescription
     }
-    return "Entitler request failed: \(withoutFullStop(error.localizedDescription))."
   }
 
   private static func withoutFullStop(_ message: String) -> String {
