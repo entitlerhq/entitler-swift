@@ -159,9 +159,10 @@ struct LiveTests {
       #expect(observed.outcome == .recorded)
       #expect(observed.overBy == 5)
       try await customer.adjustMeter(Live.aiCredits, to: 0, idempotencyKey: Live.key("reset"))
+      let registeredAt = try await customer.details().customer.createdAt
       let earlier = try await customer.recordUsage(
         of: Live.aiCredits, amount: 1, idempotencyKey: Live.key("earlier"),
-        occurredAt: Date().addingTimeInterval(-60))
+        occurredAt: registeredAt.addingTimeInterval(1))
       #expect(earlier.occurredAt != nil)
 
       let finishedKey = Live.key("hold")

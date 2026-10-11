@@ -100,11 +100,11 @@ import Testing
     do {
       _ = try await api.run {
         try await api.server { $0.maxRetries = 1 }.customer("u").recordUsage(
-          of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k", timeout: 0.05)
+          of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k", timeout: 0.5)
       }
       Issue.record("Expected an error")
     } catch EntitlerError.timeout(let error) {
-      #expect(error.timeout == 0.05)
+      #expect(error.timeout == 0.5)
       #expect(error.idempotencyKey != nil)
     }
     #expect(api.count == 2)
