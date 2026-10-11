@@ -68,6 +68,7 @@ public actor MemoryCacheStore: CacheStore {
   private let capacity: Int
   private var entries: [String: (entry: CacheEntry, used: UInt64)] = [:]
   private var clock: UInt64 = 0
+  private var asked: (@Sendable (String) -> Void)?
 
   /// Creates a store that keeps at most `capacity` answers.
   public init(capacity: Int) {
@@ -76,6 +77,7 @@ public actor MemoryCacheStore: CacheStore {
 
   /// The entry kept under a key, marked as just used.
   public func entry(forKey key: String) -> CacheEntry? {
+    asked?(key)
     guard let kept = entries[key] else { return nil }
     clock += 1
     entries[key] = (kept.entry, clock)
@@ -92,4 +94,6 @@ public actor MemoryCacheStore: CacheStore {
   }
 
   func removeAll() { entries = [:] }
+
+  func observe(_ hook: @escaping @Sendable (String) -> Void) { asked = hook }
 }

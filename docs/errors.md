@@ -5,7 +5,7 @@ Every failure is an `EntitlerError`, except cancellation (`CancellationError`), 
 
 | Case | When | Carries |
 | --- | --- | --- |
-| `.api(APIError)` | the API answered with a status other than 2xx, or a 2xx answer this SDK cannot read (`invalid_response`) | `status`, `code`, `message`, `requestID`, `retryAfter`, `idempotencyKey`, `payment`, `listingGaps`, `listingProblems` |
+| `.api(APIError)` | the API answered with a status other than 2xx, or a 2xx answer this SDK cannot read (`invalid_response`) | `status`, `code`, `message`, `requestID`, `retryAfter`, `idempotencyKey`, `payment` |
 | `.connection(ConnectionError)` | no answer arrived | `underlyingError`, `idempotencyKey` |
 | `.timeout(TimeoutError)` | an attempt took longer than its timeout | `timeout`, `idempotencyKey` |
 | `.token(TokenError)` | a token provider failed or answered an unusable token | `message`, `underlyingError` |
@@ -30,7 +30,7 @@ do {
 `.featureNotFound`, `.notSelfServe`, `.scopeRequired`, `.credentialNotAllowed`, `.rateLimited`,
 `.stale`, `.idempotencyMismatch`, `.holdExpired`, `.capabilityRequired`, plus the SDK's own
 `.httpError` for an answer without a code and `.invalidResponse` for one it cannot read. An unknown
-code is kept as it is, never an error. API messages are written for you, the developer, not for
+code is kept as it is, never an error, with `isKnown` false. API messages are written for you, the developer, not for
 end users: show your own copy.
 
 `isUnreachable` on an `EntitlerError` is true for a connection failure, a timeout, a failing token
@@ -43,7 +43,7 @@ to its [snapshot](offline-snapshots.md).
 | --- | --- |
 | `subscribe` | `return_url_required`, `payment_required` (declined), `not_self_serve`, `scope_required`, `customer_not_found`, `capability_required`, `invalid_body` |
 | `cancel`, `undoPendingChange` | `not_self_serve`, `scope_required`, `customer_not_found`, `capability_required` |
-| `billingPortal` | `stale` (never billed), `scope_required`, `capability_required` |
+| `billingPortal` | `not_found` (never billed), `scope_required`, `capability_required` |
 | `syncBilling` | `rate_limited`, `scope_required`, `capability_required`, and `503` while a change is followed |
 | `setPlan` | `payment_required`, `billed_elsewhere`, `customer_not_found`, `invalid_body` |
 | `setAddOn` | `payment_required`, `not_found`, `customer_not_found`, `invalid_body` |

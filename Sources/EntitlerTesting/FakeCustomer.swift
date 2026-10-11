@@ -331,7 +331,7 @@ struct State {
         201,
         FakeAnswers.grantChange(
           id: "grant_\(counter)", feature: body["feature"] as? String ?? "",
-          value: body["value"] as? String ?? "true", reason: body["reason"] as? String ?? "",
+          value: body["value"] as? String ?? "", reason: body["reason"] as? String ?? "",
           actor: body["actor"] as? String), true
       )
     case "revokeGrant":

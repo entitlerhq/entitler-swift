@@ -380,12 +380,6 @@ extension Customer {
       idempotencyKey: idempotencyKey, timeout: timeout)
   }
 
-  /// Reads a hold back.
-  public func hold(id holdID: String, timeout: TimeInterval? = nil) async throws -> UsageHold {
-    try await handle.call(
-      "GET", ["usage", "holds", require(holdID, Messages.hold)], timeout: timeout)
-  }
-
   /// Signs the customer's entitlements, so an app can check them offline until it expires.
   ///
   /// Meters in a snapshot are frozen when it is signed. Verify it with
@@ -487,8 +481,8 @@ extension Customer {
 
   /// The payment provider's page where the customer updates payment details and sees invoices.
   ///
-  /// It changes no plan. A customer the provider has never billed answers `409`
-  /// ``ErrorCode/stale``. In an app, open the URL in `ASWebAuthenticationSession`.
+  /// It changes no plan. A customer the provider has never billed answers `404`
+  /// ``ErrorCode/notFound``. In an app, open the URL in `ASWebAuthenticationSession`.
   ///
   /// - Parameters:
   ///   - returnURL: Where the page sends the customer back.

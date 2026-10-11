@@ -80,14 +80,8 @@ import Testing
     if outcome == "brand_new" { #expect(result.outcome == .unknown("brand_new")) }
   }
 
-  @Test func holdsSettleReleaseAndReadBack() async throws {
-    let api = FakeAPI { request in
-      request.method == "GET"
-        ? .json(
-          #"{"id":"h_1","customer":"u","feature":"ai_credits","amount":10,"state":"open","expiresAt":"2026-10-09T01:52:13Z","settledAmount":null,"usageId":null,"createdAt":"2026-10-09T01:47:13Z"}"#
-        )
-        : .json(Fixture.usage(outcome: "held", holdID: #""h_1""#))
-    }
+  @Test func holdsSettleAndRelease() async throws {
+    let api = FakeAPI { _ in .json(Fixture.usage(outcome: "held", holdID: #""h_1""#)) }
     let customer = try api.server().customer("u")
     try await api.run {
       let held = try await customer.holdUsage(
@@ -102,9 +96,6 @@ import Testing
       try await customer.releaseUsage(hold: "h_1")
       #expect(api.last.method == "DELETE")
       #expect(api.last.path == "/customers/u/usage/holds/h_1")
-      let hold = try await customer.hold(id: "h_1")
-      #expect(hold.state == .open)
-      #expect(hold.usageID == nil)
       await #expect(throws: ArgumentError(message: "Provide the id of the hold.")) {
         try await customer.releaseUsage(hold: "")
       }

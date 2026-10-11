@@ -678,42 +678,6 @@ public enum UsageMode: RawRepresentable, Hashable, Sendable, Codable {
   }
 }
 
-/// The state of a usage hold.
-public enum HoldState: RawRepresentable, Hashable, Sendable, Codable {
-  /// Counting against the allowance.
-  case open
-  /// Settled with the real amount.
-  case settled
-  /// Released.
-  case released
-  /// Expired before it was settled or released.
-  case expired
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "open": self = .open
-    case "settled": self = .settled
-    case "released": self = .released
-    case "expired": self = .expired
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .open: "open"
-    case .settled: "settled"
-    case .released: "released"
-    case .expired: "expired"
-    case .unknown(let value): value
-    }
-  }
-}
-
 /// What happened to one event of a batch.
 public enum UsageEventOutcome: RawRepresentable, Hashable, Sendable, Codable {
   /// The event was recorded.
@@ -929,66 +893,6 @@ public enum PaymentStatus: RawRepresentable, Hashable, Sendable, Codable {
     case .requiresAction: "requires_action"
     case .processing: "processing"
     case .pending: "pending"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// Why a listing leaves a plan and period blank.
-public enum ListingGapKind: RawRepresentable, Hashable, Sendable, Codable {
-  /// The listing stops selling it.
-  case stopsSelling
-  /// Nothing lists it.
-  case unlisted
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "stops_selling": self = .stopsSelling
-    case "unlisted": self = .unlisted
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .stopsSelling: "stops_selling"
-    case .unlisted: "unlisted"
-    case .unknown(let value): value
-    }
-  }
-}
-
-/// Why a listing's price fails the checks.
-public enum ListingProblemKind: RawRepresentable, Hashable, Sendable, Codable {
-  /// The price does not exist.
-  case priceNotFound
-  /// The price is inactive.
-  case priceInactive
-  /// The price's interval differs from the period.
-  case intervalMismatch
-  /// A value this SDK does not know yet.
-  case unknown(String)
-
-  /// Creates the value from the API's string.
-  public init(rawValue: String) {
-    switch rawValue {
-    case "price_not_found": self = .priceNotFound
-    case "price_inactive": self = .priceInactive
-    case "interval_mismatch": self = .intervalMismatch
-    default: self = .unknown(rawValue)
-    }
-  }
-
-  /// The API's string for the value.
-  public var rawValue: String {
-    switch self {
-    case .priceNotFound: "price_not_found"
-    case .priceInactive: "price_inactive"
-    case .intervalMismatch: "interval_mismatch"
     case .unknown(let value): value
     }
   }

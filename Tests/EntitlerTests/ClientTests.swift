@@ -245,8 +245,6 @@ import Testing
       #expect(error.requestID == "req_1")
       #expect(error.idempotencyKey == "key-1")
       #expect(error.payment?.status == .requiresAction)
-      #expect(error.listingGaps.first?.kind == .unlisted)
-      #expect(error.listingProblems.first?.problem == .priceInactive)
       #expect(error.retryAfter == nil)
       #expect(error.description == "402 payment_required: Pay first.")
       #expect(EntitlerError.api(error).localizedDescription == "402 payment_required: Pay first.")
@@ -262,7 +260,6 @@ import Testing
       #expect(error.code == .httpError)
       #expect(error.message == "Entitler answered with HTTP 418.")
       #expect(error.idempotencyKey == nil)
-      #expect(error.listingGaps.isEmpty)
     }
   }
 

@@ -124,10 +124,6 @@ public struct APIError: Error, Sendable, LocalizedError, CustomStringConvertible
   public let idempotencyKey: String?
   /// With `402 payment_required`: the payment a plan change waits on.
   public let payment: Payment?
-  /// With `409 listing_gaps`: the gaps a rollout would leave.
-  public let listingGaps: [ListingGap]
-  /// With `409 listing_invalid`: the listings whose price fails the checks.
-  public let listingProblems: [ListingProblem]
   /// For ``ErrorCode/invalidResponse``, the decoding failure.
   public internal(set) var underlyingError: (any Error)? = nil
 
@@ -247,6 +243,27 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
 
   /// The code as the API sends it.
   public var description: String { rawValue }
+
+  /// Whether this version of the SDK knows the code; an unknown one is kept as the API sent it.
+  public var isKnown: Bool { Self.known.contains(rawValue) }
+
+  private static let known: Set<String> = [
+    "allowance_reached", "already_connected", "as_of_not_allowed", "billed_elsewhere",
+    "body_too_large", "browser_not_allowed", "cap_reached", "capability_required",
+    "carry_forward_conflict", "catalogue_not_empty", "change_locked", "change_required",
+    "connection_failed", "connection_in_use", "connection_mode", "connection_required",
+    "connection_unreadable", "credential_not_allowed", "customer_not_found", "email_taken",
+    "email_unconfirmed", "experiment_running", "feature_not_found", "hold_expired",
+    "hold_released", "hold_settled", "http_error", "idempotency_key_required",
+    "idempotency_mismatch", "invalid_amount", "invalid_body", "invalid_idempotency_key",
+    "invalid_occurred_at", "invalid_path", "invalid_response", "last_environment", "limit_reached",
+    "listing_gaps", "listing_invalid", "method_not_allowed", "not_found", "not_listed",
+    "not_metered", "not_self_serve", "payment_required", "person_required", "plan_still_billed",
+    "provider_account_changed", "provider_partial", "publication_failed", "rate_limited",
+    "registration_closed", "return_url_required", "review_required", "scope_required",
+    "sign_ups_closed", "stale", "switch_in_use", "switch_needed", "switch_off", "timed_out",
+    "too_many_customers", "track_closed", "unauthorised", "unavailable",
+  ]
 
   /// The organisation's allowance is used up.
   public static let allowanceReached = ErrorCode(rawValue: "allowance_reached")

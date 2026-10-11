@@ -69,7 +69,6 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 ### Usage
 
 - ``UsageResult``
-- ``UsageHold``
 - ``Hold``
 - ``UsageMode``
 - ``UsageOutcome``

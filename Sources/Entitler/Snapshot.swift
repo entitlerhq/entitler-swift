@@ -165,7 +165,7 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
   else { throw changed }
 
   guard let payload = Base64URL.decode(segments[1]),
-    let claims = try? JSON.decoder().decode(SnapshotClaims.self, from: payload),
+    let claims = try? claimsDecoder().decode(SnapshotClaims.self, from: payload),
     let fields = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
     fields.keys.contains("release"), fields.keys.contains("change"),
     claims.entitlements.allSatisfy(\.hasValidMeters)
@@ -209,4 +209,10 @@ public func verifySnapshot(_ token: String, expecting expected: SnapshotExpectat
       environment: nil,
       track: claims.track, release: claims.release, change: claims.change, testers: claims.testers,
       experiment: nil))
+}
+
+private func claimsDecoder() -> JSONDecoder {
+  let decoder = JSON.decoder()
+  decoder.userInfo[.snapshotClaims] = true
+  return decoder
 }

@@ -114,13 +114,13 @@ not make, such as of a sales-led plan, fails with `403 not_self_serve`.
 do {
   let portal = try await customer.billingPortal(returnURL: returnURL)
   print("Open", portal.url)
-} catch EntitlerError.api(let error) where error.code == .stale {
+} catch EntitlerError.api(let error) where error.code == .notFound {
   print("No provider has billed this customer yet")
 }
 ```
 
 The portal shows payment details and invoices; it changes no plan. A customer the provider has
-never billed answers `409 stale`.
+never billed answers `404 not_found`.
 
 The company's own changes (deals, support, verified store purchases) are on the server's customer:
 see [company decisions](company-decisions.md).

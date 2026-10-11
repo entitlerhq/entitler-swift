@@ -221,7 +221,7 @@ public struct Entitlement: Codable, Hashable, Sendable {
     case key, type, entitled, value, sources, used, held, remaining, resetsAt, upgrades
   }
 
-  /// Decodes an entitlement; a snapshot's claims carry no `upgrades`.
+  /// Decodes an entitlement; a snapshot's claims never carry `upgrades`, so any there are ignored.
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     key = try container.decode(String.self, forKey: .key)
@@ -233,8 +233,14 @@ public struct Entitlement: Codable, Hashable, Sendable {
     held = try container.decodeIfPresent(Int64.self, forKey: .held)
     remaining = try container.decodeIfPresent(FeatureValue.self, forKey: .remaining)
     resetsAt = try container.decodeIfPresent(Date.self, forKey: .resetsAt)
-    upgrades = try container.decodeIfPresent([Upgrade].self, forKey: .upgrades) ?? []
+    upgrades =
+      decoder.userInfo[.snapshotClaims] != nil
+      ? [] : try container.decodeIfPresent([Upgrade].self, forKey: .upgrades) ?? []
   }
+}
+
+extension CodingUserInfoKey {
+  static let snapshotClaims = CodingUserInfoKey(rawValue: "snapshotClaims")!
 }
 
 /// Every entitlement a customer holds, groups included, with Entitler's decision on each.
@@ -792,33 +798,6 @@ public struct UsageResult: Codable, Hashable, Sendable, Replaying {
   }
 }
 
-/// A usage hold, as ``Customer/hold(id:timeout:)`` reads it.
-public struct UsageHold: Codable, Hashable, Sendable {
-  /// The hold's id.
-  public let id: String
-  /// The customer's external id.
-  public let customer: String
-  /// The feature's key.
-  public let feature: String
-  /// The amount held.
-  public let amount: Int64
-  /// Open, settled, released or expired.
-  public let state: HoldState
-  /// When it expires on its own.
-  public let expiresAt: Date
-  /// The amount it was settled with.
-  public let settledAmount: Int64?
-  /// The report its settlement recorded.
-  public let usageID: String?
-  /// When it was placed.
-  public let createdAt: Date
-
-  enum CodingKeys: String, CodingKey {
-    case id, customer, feature, amount, state, expiresAt, settledAmount, createdAt
-    case usageID = "usageId"
-  }
-}
-
 /// Why one event of a batch was not recorded.
 public struct UsageEventError: Error, Codable, Hashable, Sendable {
   /// The code a single report would answer, or the SDK's own for an event it refused or a
@@ -1012,8 +991,8 @@ public struct Grant: Codable, Hashable, Sendable {
   public let id: String
   /// The feature's key.
   public let feature: String
-  /// The value granted, as the API writes it.
-  public let value: String
+  /// The value granted: ``FeatureValue/on`` for an on/off feature, an amount, or unlimited.
+  public let value: FeatureValue
   /// When it started.
   public let from: Date
   /// When it ends, or `nil` when it never does.
@@ -1026,6 +1005,58 @@ public struct Grant: Codable, Hashable, Sendable {
   public let by: String
   /// The person or system that decided, as the write named it.
   public let actor: String?
+
+  enum CodingKeys: String, CodingKey {
+    case id, feature, value, from, until, revokedAt, reason, by, actor
+  }
+
+  /// Decodes a grant; the API writes its value as a string: empty for on, digits for an amount,
+  /// or `unlimited`.
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(String.self, forKey: .id)
+    feature = try container.decode(String.self, forKey: .feature)
+    let text = try container.decode(String.self, forKey: .value)
+    if text.isEmpty {
+      value = .on
+    } else if text == "unlimited" {
+      value = .unlimited
+    } else if !text.isEmpty, text.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+      let amount = Int64(text), amount <= maxAmount
+    {
+      value = .amount(amount)
+    } else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .value, in: container,
+        debugDescription: "A grant's value reads as no feature value.")
+    }
+    from = try container.decode(Date.self, forKey: .from)
+    until = try container.decodeIfPresent(Date.self, forKey: .until)
+    revokedAt = try container.decodeIfPresent(Date.self, forKey: .revokedAt)
+    reason = try container.decode(String.self, forKey: .reason)
+    by = try container.decode(String.self, forKey: .by)
+    actor = try container.decodeIfPresent(String.self, forKey: .actor)
+  }
+
+  /// Encodes the grant as the API writes it.
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(id, forKey: .id)
+    try container.encode(feature, forKey: .feature)
+    let text: String =
+      switch value {
+      case .on: ""
+      case .amount(let amount): String(amount)
+      case .unlimited: "unlimited"
+      }
+    try container.encode(text, forKey: .value)
+    try container.encode(from, forKey: .from)
+    try container.encodeIfPresent(until, forKey: .until)
+    try container.encodeIfPresent(revokedAt, forKey: .revokedAt)
+    try container.encode(reason, forKey: .reason)
+    try container.encode(by, forKey: .by)
+    try container.encodeIfPresent(actor, forKey: .actor)
+  }
 }
 
 /// A grant made or revoked, as `grant` and ``ServerCustomer/revokeGrant(id:reason:actor:idempotencyKey:timeout:)`` answer.
@@ -1299,34 +1330,6 @@ public struct Payment: Codable, Hashable, Sendable {
   public let status: PaymentStatus
   /// The provider's page where the customer pays or confirms it.
   public let url: String?
-}
-
-/// A plan and billing period a listing leaves blank.
-public struct ListingGap: Codable, Hashable, Sendable {
-  /// Why it is blank.
-  public let kind: ListingGapKind
-  /// The plan's id.
-  public let plan: String
-  /// The plan's key.
-  public let key: String
-  /// The billing period.
-  public let period: String
-  /// The connection.
-  public let channel: Channel?
-}
-
-/// A listing whose price fails the checks.
-public struct ListingProblem: Codable, Hashable, Sendable {
-  /// The connection.
-  public let channel: Channel
-  /// The plan's key.
-  public let plan: String
-  /// The billing period.
-  public let period: String
-  /// The provider's ids.
-  public let ids: [String: String]
-  /// What is wrong.
-  public let problem: ListingProblemKind
 }
 
 extension Check: MeterChecked {

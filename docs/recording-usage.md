@@ -128,8 +128,7 @@ live meter shows `held` apart.
 
 `holdUsage(of:amount:idempotencyKey:ttlSeconds:)` answers the hold's `UsageResult` for a hold
 another process settles with `settleUsage(hold:amount:)` or frees with `releaseUsage(hold:)`.
-Settling the same amount again answers `duplicate`; releasing twice is safe. Read a hold back
-with `hold(id:)`.
+Settling the same amount again answers `duplicate`; releasing twice is safe.
 
 ## Batches from the server
 

@@ -34,6 +34,7 @@ struct Reply: Sendable {
   var body = Data()
   var failure: URLError.Code?
   var hang = false
+  var cutOff = false
   var delay: TimeInterval = 0
 
   static func json(_ text: String, status: Int = 200, headers: [String: String] = [:]) -> Reply {
@@ -51,6 +52,9 @@ struct Reply: Sendable {
 
   static func failure(_ code: URLError.Code) -> Reply { Reply(failure: code) }
   static let hanging = Reply(hang: true)
+  static let cutOffJSON = Reply(
+    headers: ["Content-Type": "application/json"], body: Data(#"{"customer":"us"#.utf8),
+    cutOff: true)
 }
 
 final class Box<Value>: @unchecked Sendable {
@@ -179,7 +183,11 @@ final class FakeProtocol: URLProtocol {
       let loader = loader.value
       loader.client?.urlProtocol(loader, didReceive: response, cacheStoragePolicy: .notAllowed)
       loader.client?.urlProtocol(loader, didLoad: reply.body)
-      loader.client?.urlProtocolDidFinishLoading(loader)
+      if reply.cutOff {
+        loader.client?.urlProtocol(loader, didFailWithError: URLError(.networkConnectionLost))
+      } else {
+        loader.client?.urlProtocolDidFinishLoading(loader)
+      }
     }
     if reply.delay > 0 {
       DispatchQueue.global().asyncAfter(deadline: .now() + reply.delay, execute: finish)
@@ -231,7 +239,7 @@ enum Fixture {
     #"{"id":"c_1","externalId":"user_1","name":"Ada","email":"ada@example.com","environmentId":"env_1","sample":false,"createdAt":"2026-10-09T01:47:13.968Z","plan":{"id":"p_1","key":"free","name":"Free","version":1},"plans":[{"id":"p_1","key":"free","name":"Free","version":1,"product":"app"}],"defaultPlan":{"id":"p_1","key":"free","name":"Free"},"status":"active","kind":"default","metadata":{"team":"a"},"track":{"id":"trk_1","name":"All customers"},"testCustomer":false}"#
 
   static let detail =
-    #"{"customer":\#(summary),"asOf":"2026-10-09T01:47:13.968Z","subscription":{"product":{"key":"app","name":"App"},"plan":{"id":"p_2","key":"pro","name":"Pro"},"version":1,"cohort":null,"period":{"key":"monthly","label":"Monthly"},"startedAt":"2026-10-01T00:00:00Z","renewsAt":"2026-11-01T00:00:00Z","billing":null,"addOns":[{"plan":{"id":"p_3","key":"sso_addon","name":"SSO"},"version":1,"quantity":1,"countable":false,"addedAt":"2026-10-01T00:00:00Z","movingTo":null,"purchase":{"money":"test","channel":null,"release":2,"change":null,"arm":null}}],"pending":{"type":"cancel","movingTo":{"id":"p_1","key":"free","name":"Free"}},"purchase":{"money":"test","channel":{"provider":"stripe","connectionId":"conn_1"},"release":2,"change":null,"arm":"control"}},"defaultPlan":null,"products":[],"addOns":[],"entitlements":[],"banked":{"ai_credits":5},"moveOptions":[],"grants":[{"id":"g_1","feature":"sso","value":"true","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Trial","by":"key"}],"usage":{"items":[],"next":null},"activity":[{"text":"Registered","at":"2026-10-01T00:00:00Z"}],"environment":{"id":"env_1","name":"development","kind":"test"}}"#
+    #"{"customer":\#(summary),"asOf":"2026-10-09T01:47:13.968Z","subscription":{"product":{"key":"app","name":"App"},"plan":{"id":"p_2","key":"pro","name":"Pro"},"version":1,"cohort":null,"period":{"key":"monthly","label":"Monthly"},"startedAt":"2026-10-01T00:00:00Z","renewsAt":"2026-11-01T00:00:00Z","billing":null,"addOns":[{"plan":{"id":"p_3","key":"sso_addon","name":"SSO"},"version":1,"quantity":1,"countable":false,"addedAt":"2026-10-01T00:00:00Z","movingTo":null,"purchase":{"money":"test","channel":null,"release":2,"change":null,"arm":null}}],"pending":{"type":"cancel","movingTo":{"id":"p_1","key":"free","name":"Free"}},"purchase":{"money":"test","channel":{"provider":"stripe","connectionId":"conn_1"},"release":2,"change":null,"arm":"control"}},"defaultPlan":null,"products":[],"addOns":[],"entitlements":[],"banked":{"ai_credits":5},"moveOptions":[],"grants":[{"id":"g_1","feature":"sso","value":"","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Trial","by":"key"}],"usage":{"items":[],"next":null},"activity":[{"text":"Registered","at":"2026-10-01T00:00:00Z"}],"environment":{"id":"env_1","name":"development","kind":"test"}}"#
 }
 
 struct Unchecked<Value>: @unchecked Sendable {

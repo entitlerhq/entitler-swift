@@ -52,7 +52,7 @@ do {
   do {
     let portal = try await customer.billingPortal(returnURL: returnURL)
     print("Billing portal: \(portal.url)")
-  } catch EntitlerError.api(let error) where error.code == .stale {
+  } catch EntitlerError.api(let error) where error.code == .notFound {
     print("No provider has billed this customer yet: \(error.message)")
   }
 

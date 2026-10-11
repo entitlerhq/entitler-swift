@@ -355,7 +355,6 @@ extension JSONWebKey {
     roundTrip(UsageSource.self, ["api", "client", "dashboard"])
     roundTrip(UsageRefusal.self, ["not_entitled", "over_allowance"])
     roundTrip(UsageMode.self, ["gate", "observe"])
-    roundTrip(HoldState.self, ["open", "settled", "released", "expired"])
     roundTrip(UsageEventOutcome.self, ["recorded", "duplicate", "error"])
     roundTrip(CustomerKind.self, ["recurring", "one_time", "changing", "default", "none"])
     roundTrip(
@@ -367,8 +366,6 @@ extension JSONWebKey {
     roundTrip(TrackSource.self, ["server", "dashboard", "store_sandbox"])
     roundTrip(Money.self, ["real", "test"])
     roundTrip(PaymentStatus.self, ["declined", "requires_action", "processing", "pending"])
-    roundTrip(ListingGapKind.self, ["stops_selling", "unlisted"])
-    roundTrip(ListingProblemKind.self, ["price_not_found", "price_inactive", "interval_mismatch"])
     roundTrip(EntitlementSourceType.self, ["plan", "addon", "grant", "banked", "group"])
     roundTrip(
       UsageOutcome.self,

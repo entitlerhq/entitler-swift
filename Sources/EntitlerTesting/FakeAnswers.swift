@@ -165,7 +165,7 @@ public enum FakeAnswers {
 
   /// A grant made or revoked.
   public static func grantChange(
-    id: String = "grant_1", feature: String, value: String = "true", revoked: Bool = false,
+    id: String = "grant_1", feature: String, value: String = "", revoked: Bool = false,
     reason: String = "", actor: String? = nil
   ) -> Data {
     json([

@@ -198,7 +198,7 @@ import Testing
   @Test func grantsAnswerTheGrant() async throws {
     let api = FakeAPI { _ in
       .json(
-        #"{"grant":{"id":"g_1","feature":"sso","value":"true","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Ticket 42","by":"Support key","actor":"agent-1"}}"#,
+        #"{"grant":{"id":"g_1","feature":"sso","value":"","from":"2026-10-01T00:00:00Z","until":null,"revokedAt":null,"reason":"Ticket 42","by":"Support key","actor":"agent-1"}}"#,
         status: 201)
     }
     let customer = try api.server().customer("u")
@@ -207,6 +207,7 @@ import Testing
         Feature<OnOff>("sso"), days: 30, reason: "Ticket 42", actor: "agent-1")
       #expect(change.grant.id == "g_1")
       #expect(change.grant.actor == "agent-1")
+      #expect(change.grant.value == .on)
       #expect(!change.replayed)
       #expect(api.last.json?.keys.sorted() == ["actor", "days", "feature", "reason"])
       try await customer.grant("seats", value: .amount(5))

@@ -529,7 +529,6 @@ import Testing
       #expect(error.message == "Entitler answered with HTTP 402.")
       #expect(error.payment?.status == .declined)
       #expect(error.payment?.url == nil)
-      #expect(error.listingGaps.isEmpty)
     }
     api.answer { _ in
       .json(#"{"error":{"code":"x","message":"y","payment":{"status":"declined"}}}"#, status: 409)

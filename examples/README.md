@@ -17,7 +17,7 @@ in `ENTITLER_KEY`, from this directory:
 - `offline`: fetches a snapshot and the keys, then verifies the snapshot offline and checks a
   feature. `ENTITLER_KEY=ent_test_… swift run offline`
 - `billing`: a billing page from `plans()`, `subscribe` handling every next step, the return page
-  with `syncBilling()`, `cancel` and `undoPendingChange`, the billing portal handling `409 stale`,
+  with `syncBilling()`, `cancel` and `undoPendingChange`, the billing portal handling `404 not_found`,
   and the company's `setPlan` with `billing: .end` and a grant whose id it keeps.
   `ENTITLER_KEY=ent_test_… swift run billing`
 - `generated-features`: a constants file from `entitler generate`, and code that uses it.

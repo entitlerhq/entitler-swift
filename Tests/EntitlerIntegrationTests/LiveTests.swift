@@ -174,7 +174,6 @@ struct LiveTests {
       let released = try await customer.startHold(
         of: Live.aiCredits, amount: 2, idempotencyKey: Live.key("release"))
       #expect(try await released.release().outcome == .released)
-      #expect(try await customer.hold(id: released.id).state == .released)
       do {
         _ = try await customer.startHold(of: Live.aiCredits, amount: 4, idempotencyKey: finishedKey)
         Issue.record("Expected the finished hold's key to replay")
@@ -357,7 +356,7 @@ struct LiveTests {
       let revoked = try await customer.revokeGrant(id: granted.grant.id)
       #expect(revoked.grant.revokedAt != nil)
       #expect(try await customer.syncBilling().changed == false)
-      await Live.expectAPIError(409, .stale) {
+      await Live.expectAPIError(404, .notFound) {
         _ = try await customer.billingPortal(returnURL: Live.returnURL)
       }
     }

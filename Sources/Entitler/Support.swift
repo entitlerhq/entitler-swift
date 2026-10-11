@@ -134,7 +134,10 @@ func parseInstant(_ text: String) -> Date? {
 }
 
 func formatInstant(_ date: Date) -> String {
-  Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(date)
+  let millis = (date.timeIntervalSince1970 * 1000).rounded()
+  let seconds = (millis / 1000).rounded(.down)
+  let whole = Date.ISO8601FormatStyle().format(Date(timeIntervalSince1970: seconds))
+  return whole.dropLast() + String(format: ".%03dZ", Int(millis - seconds * 1000))
 }
 
 extension Character {

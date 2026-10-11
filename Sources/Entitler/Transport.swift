@@ -64,6 +64,7 @@ struct Response: Sendable {
   let retryAfter: TimeInterval?
   var requestID: String? = nil
   var replayed = false
+  var idempotencyKey: String? = nil
 
   var noStore: Bool { cacheControl?.lowercased().contains("no-store") ?? false }
 }
@@ -236,7 +237,7 @@ final class Core: Sendable, CustomReflectable {
         APIError(
           status: response.status, code: .invalidResponse,
           message: "Entitler sent an answer this SDK cannot read.", requestID: response.requestID,
-          retryAfter: nil, idempotencyKey: nil, payment: nil, listingGaps: [], listingProblems: [],
+          retryAfter: nil, idempotencyKey: response.idempotencyKey, payment: nil,
           underlyingError: error))
     }
   }
@@ -272,9 +273,7 @@ final class Core: Sendable, CustomReflectable {
           throw EntitlerError.api(
             APIError(
               status: 304, code: .httpError, message: "Entitler answered with HTTP 304.",
-              requestID: response.requestID, retryAfter: nil, idempotencyKey: nil, payment: nil,
-              listingGaps: [],
-              listingProblems: []))
+              requestID: response.requestID, retryAfter: nil, idempotencyKey: nil, payment: nil))
         }
         entry = CacheEntry(
           body: kept.body, etag: response.etag ?? kept.etag,
@@ -392,7 +391,8 @@ final class Core: Sendable, CustomReflectable {
           token = fresh
           continue
         }
-        let response = Response(http, body: body, now: hooks.now())
+        var response = Response(http, body: body, now: hooks.now())
+        response.idempotencyKey = idempotencyKey
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
           if isSignedIn, let named = try? JSON.decoder().decode(Named.self, from: body) {
             await state.setSignedInID(named.customer)
@@ -510,12 +510,6 @@ final class Core: Sendable, CustomReflectable {
     func text(_ key: String) -> String? {
       (detail?[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
     }
-    func items<Item: Decodable>(_ key: String) -> [Item] {
-      guard let array = detail?[key] as? [Any],
-        let data = try? JSONSerialization.data(withJSONObject: array)
-      else { return [] }
-      return (try? JSON.decoder().decode([Item].self, from: data)) ?? []
-    }
     var payment: Payment?
     if status == 402, let object = detail?["payment"] as? [String: Any],
       let raw = object["status"] as? String, case let paymentStatus = PaymentStatus(rawValue: raw),
@@ -532,9 +526,7 @@ final class Core: Sendable, CustomReflectable {
         retryAfter($0, now: now)
       },
       idempotencyKey: idempotencyKey,
-      payment: payment,
-      listingGaps: items("listingGaps"),
-      listingProblems: items("listingProblems"))
+      payment: payment)
   }
 }
 
@@ -601,8 +593,7 @@ extension Response {
         Entitler.retryAfter($0, now: now)
       },
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
-      replayed: http.value(forHTTPHeaderField: "Idempotent-Replayed")?.trimmed.lowercased()
-        == "true")
+      replayed: http.value(forHTTPHeaderField: "Idempotent-Replayed") == "true")
   }
 }
 

@@ -119,8 +119,7 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
           (
             index,
             Event(
-              customer: try UsageBatchEvent.check(
-                event.customer, .invalidBody, Messages.customerID),
+              customer: try UsageBatchEvent.customer(event.customer),
               feature: try UsageBatchEvent.check(event.feature.key, .invalidBody, Messages.feature),
               amount: try UsageBatchEvent.amount(event.amount), occurredAt: event.occurredAt,
               idempotencyKey: try UsageBatchEvent.key(event.idempotencyKey))
@@ -266,6 +265,14 @@ public struct UsageBatchEvent: Hashable, Sendable {
     self.amount = amount
     self.occurredAt = occurredAt
     self.idempotencyKey = idempotencyKey
+  }
+
+  static func customer(_ id: String) throws -> String {
+    let id = try check(id, .invalidBody, Messages.customerID)
+    guard !id.allSatisfy({ $0 == "." }) else {
+      throw UsageEventError(code: .invalidBody, message: Messages.dots)
+    }
+    return id
   }
 
   static func check(_ value: String, _ code: ErrorCode, _ message: String) throws -> String {
