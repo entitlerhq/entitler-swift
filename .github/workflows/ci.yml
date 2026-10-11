@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+  workflow_call:
+  schedule:
+    - cron: "17 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check formatting and lint
+        run: swift format lint --strict --recursive Sources Tests Plugins Package.swift examples/Package.swift examples/quickstart examples/pricing-page examples/in-app examples/metered-work examples/offline examples/billing examples/swiftui-view-model
+
+  build:
+    name: Build and type check
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build every target with warnings as errors
+        run: swift build --build-tests -Xswiftc -warnings-as-errors
+
+  test:
+    name: Test (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux, Swift 6.0", os: ubuntu-24.04, container: "swift:6.0-noble" }
+          - { name: "Linux, Swift 6.1", os: ubuntu-24.04, container: "swift:6.1-noble" }
+          - { name: "Linux, Swift 6.2", os: ubuntu-24.04, container: "swift:6.2-noble" }
+          - { name: "Linux, Swift 6.3", os: ubuntu-24.04, container: "swift:6.3-noble" }
+          - { name: "Linux, Swift 6.4", os: ubuntu-24.04, container: "swift:6.4-noble", coverage: true, sanitize: true }
+          - { name: "macOS, Xcode 16.0", os: macos-15, xcode: "16.0", apple: true }
+          - { name: "macOS, newest Xcode", os: macos-15, xcode: newest, apple: true }
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        if: ${{ matrix.apple }}
+        env:
+          XCODE: ${{ matrix.xcode }}
+        run: |
+          if [ "$XCODE" = newest ]; then
+            app=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          else
+            app="/Applications/Xcode_$XCODE.app"
+          fi
+          sudo xcode-select -s "$app"
+          swift --version
+      - name: Build with warnings as errors
+        run: swift build --build-tests -Xswiftc -warnings-as-errors
+      - name: Unit tests with coverage
+        run: swift test --skip-build --skip EntitlerIntegrationTests --enable-code-coverage
+      - name: Enforce 90% line coverage
+        if: ${{ matrix.coverage }}
+        run: |
+          profile=$(swift test --show-codecov-path | sed 's/[^/]*$/default.profdata/')
+          binary=$(find .build -name 'EntitlerTests.so' -o -name 'EntitlerTests-test-runner' | head -1)
+          llvm-cov report "$binary" -instr-profile="$profile" -ignore-filename-regex='(\.build|Tests)/' | tee coverage.txt
+          percent=$(awk '/^TOTAL/ { gsub("%", "", $10); print $10 }' coverage.txt)
+          awk -v p="$percent" 'BEGIN { if (p < 90) { print "Line coverage " p "% is under 90%."; exit 1 } }'
+      - name: Thread Sanitizer
+        if: ${{ matrix.sanitize }}
+        run: swift test --sanitize=thread --skip EntitlerIntegrationTests
+      - name: Test on the iOS simulator
+        if: ${{ matrix.apple }}
+        run: |
+          device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')
+          xcodebuild test -scheme Entitler-Package -destination "id=$device" -skip-testing:EntitlerIntegrationTests -quiet
+      - name: Build for tvOS, watchOS and visionOS
+        if: ${{ matrix.apple }}
+        run: |
+          for platform in tvOS watchOS visionOS; do
+            xcodebuild build -scheme Entitler -destination "generic/platform=$platform" CODE_SIGNING_ALLOWED=NO -quiet
+          done
+
+  docs:
+    name: API reference
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    env:
+      ENTITLER_DOCS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the documentation with warnings as errors
+        run: swift package generate-documentation --target Entitler --target EntitlerTesting --target EntitlerGenerator --warnings-as-errors
+
+  examples:
+    name: Examples and snippets
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Extract the snippets of the README and guides
+        run: python3 scripts/extract-snippets.py
+      - name: Build every example and snippet
+        working-directory: examples
+        run: swift build --build-tests
+      - name: Run the testing example
+        working-directory: examples
+        run: swift test --skip-build
+      - name: Check the generated example is current
+        run: diff Tests/Golden/SampleFeatures.swift.txt examples/generated-features/EntitlerFeatures.swift
+
+  package:
+    name: Package check
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate the manifest
+        run: swift package describe --type json > /dev/null
+      - name: Build the library for release
+        run: swift build -c release --product Entitler
+      - name: Report sizes
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          swift package archive-source --output entitler-swift.zip
+          echo "Source archive: $(du -h entitler-swift.zip | cut -f1)"
+          echo "Release objects of the Entitler module: $(du -ch .build/release/Entitler.build/*.o | tail -1 | cut -f1)"
+          unzip -l entitler-swift.zip | tail -1
+
+  integration:
+    name: Live API tests
+    runs-on: ubuntu-24.04
+    container: swift:6.4-noble
+    permissions:
+      contents: read
+      issues: write
+    env:
+      ENTITLER_TEST_KEY: ${{ secrets.ENTITLER_TEST_KEY }}
+      ENTITLER_TEST_PUBLISHABLE_KEY: ${{ vars.ENTITLER_TEST_PUBLISHABLE_KEY }}
+      EVENT: ${{ github.event_name }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      REPO: ${{ github.repository }}
+      ACTOR: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Decide whether the live tests run
+        id: decide
+        run: |
+          if [ -z "$ENTITLER_TEST_KEY" ]; then
+            if [ "$EVENT" = pull_request ] && { [ "$HEAD_REPO" != "$REPO" ] || [ "$ACTOR" = "dependabot[bot]" ]; }; then
+              echo "Live API tests skipped: this pull request has no access to ENTITLER_TEST_KEY."
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "ENTITLER_TEST_KEY is missing."
+            exit 1
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+      - name: Live API tests
+        if: steps.decide.outputs.run == 'true'
+        run: swift test --filter EntitlerIntegrationTests
+      - name: Run the quickstart example
+        if: steps.decide.outputs.run == 'true'
+        working-directory: examples
+        env:
+          ENTITLER_KEY: ${{ secrets.ENTITLER_TEST_KEY }}
+        run: |
+          mkdir -p doc-snippets && echo "import Entitler" > doc-snippets/Placeholder.swift
+          swift run quickstart
+      - name: Report a failed nightly run
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          apt-get update -qq && apt-get install -y -qq gh > /dev/null
+          title="Nightly live API tests failed"
+          number=$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$REPO" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "The nightly live API tests failed: $RUN_URL"
+          fi
+
+  all-checks-passed:
+    name: All checks passed
+    if: always()
+    needs: [lint, build, test, docs, examples, package, integration]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fail unless every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "A required job finished with $result."
+              exit 1
+            fi
+          done
