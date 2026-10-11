@@ -3,12 +3,13 @@ compiles them. Blocks of declarations stay at file scope; other blocks become fu
 
 import pathlib
 import re
-import shutil
 
 root = pathlib.Path(__file__).resolve().parent.parent
 out = root / "examples" / "doc-snippets"
-shutil.rmtree(out, ignore_errors=True)
-out.mkdir(parents=True)
+out.mkdir(parents=True, exist_ok=True)
+for generated in out.glob("*.swift"):
+    if generated.name != "Placeholder.swift":
+        generated.unlink()
 
 declaration = re.compile(r"^(@|final class |class |struct |enum |actor |extension |protocol )")
 features = (root / "Tests" / "Golden" / "SampleFeatures.swift.txt").read_text()

@@ -9,7 +9,7 @@ let package = Package(
     .library(name: "Entitler", targets: ["Entitler"]),
     .library(name: "EntitlerTesting", targets: ["EntitlerTesting"]),
     .library(name: "EntitlerGenerator", targets: ["EntitlerGenerator"]),
-    .executable(name: "entitler-cli", targets: ["EntitlerCommand"]),
+    .executable(name: "entitler-cli", targets: ["entitler-cli"]),
     .plugin(name: "entitler-generate", targets: ["EntitlerGenerate"]),
   ],
   dependencies: [
@@ -24,7 +24,9 @@ let package = Package(
     ),
     .target(name: "EntitlerTesting", dependencies: ["Entitler"]),
     .target(name: "EntitlerGenerator", dependencies: ["Entitler"]),
-    .executableTarget(name: "EntitlerCommand", dependencies: ["Entitler", "EntitlerGenerator"]),
+    .executableTarget(
+      name: "entitler-cli", dependencies: ["Entitler", "EntitlerGenerator"],
+      path: "Sources/EntitlerCommand"),
     .plugin(
       name: "EntitlerGenerate",
       capability: .command(
@@ -40,7 +42,7 @@ let package = Package(
           .writeToPackageDirectory(reason: "Writes the generated feature constants."),
         ]
       ),
-      dependencies: ["EntitlerCommand"]
+      dependencies: ["entitler-cli"]
     ),
     .testTarget(
       name: "EntitlerTests", dependencies: ["Entitler", "EntitlerGenerator", "EntitlerTesting"]),

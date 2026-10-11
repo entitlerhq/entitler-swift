@@ -6,7 +6,7 @@ import Foundation
 public enum GeneratorCommand {
   /// The usage text `--help` prints.
   public static let usage = """
-    Usage: entitler <command> [options]
+    Usage: entitler-cli <command> [options]
 
     Commands:
       generate        Writes typed feature constants for your Entitler catalogue.

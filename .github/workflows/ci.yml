@@ -73,6 +73,8 @@ jobs:
           swift --version
       - name: Build with warnings as errors
         run: swift build --build-tests --enable-code-coverage -Xswiftc -warnings-as-errors
+      - name: Run the generator plugin
+        run: swift package --allow-writing-to-package-directory --allow-network-connections all:443 entitler-generate --help
       - name: Unit tests with coverage
         run: swift test --skip-build --skip EntitlerIntegrationTests --enable-code-coverage
       - name: Enforce 90% line coverage
@@ -188,9 +190,7 @@ jobs:
         working-directory: examples
         env:
           ENTITLER_KEY: ${{ secrets.ENTITLER_TEST_KEY }}
-        run: |
-          mkdir -p doc-snippets && echo "import Entitler" > doc-snippets/Placeholder.swift
-          swift run quickstart
+        run: swift run quickstart
       - name: Report a failed nightly run
         if: failure() && github.event_name == 'schedule'
         env:

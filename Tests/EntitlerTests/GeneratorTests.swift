@@ -208,6 +208,7 @@ let sampleCatalogue = [
     var (code, lines) = await run([], api: api)
     #expect(code == 1)
     #expect(lines == [GeneratorCommand.usage])
+    #expect(GeneratorCommand.usage.hasPrefix("Usage: entitler-cli <command> [options]\n"))
     (code, lines) = await run(["--help"], api: api)
     #expect(code == 0)
     (code, lines) = await run(["generate", "--help"], api: api)
