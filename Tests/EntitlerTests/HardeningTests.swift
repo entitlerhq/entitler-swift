@@ -386,6 +386,54 @@ import Testing
     #expect(calls.get == 1)
   }
 
+  @Test func aFailedRefreshWhoseOnlyWaiterLeftIsNotReused() async throws {
+    let calls = Box(0)
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let client = try EntitlerClient(
+      tokenProvider: {
+        let n = calls.with {
+          $0 += 1
+          return $0
+        }
+        if n == 1 {
+          try? await Task.sleep(nanoseconds: 100_000_000)
+          throw URLError(.timedOut)
+        }
+        return makeJWT(["sub": "u"])
+      }, cache: nil, options: api.options())
+    let hooks = api.hooks
+    let cancelled = Task {
+      try await Hooks.$current.withValue(hooks) { try await client.me.check("sso") }
+    }
+    try await Task.sleep(nanoseconds: 20_000_000)
+    cancelled.cancel()
+    _ = await cancelled.result
+    try await Task.sleep(nanoseconds: 200_000_000)
+    #expect(try await api.run { try await client.me.check("sso") }.entitled)
+    #expect(calls.get == 2)
+  }
+
+  @Test func staleAnswersKeptUnderAnEarlierTokenAreNotServed() async throws {
+    let calls = Box(0)
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .error(401, code: "token_expired"),
+      .failure(.notConnectedToInternet),
+    ])
+    let client = try EntitlerClient(
+      tokenProvider: {
+        let n = calls.with {
+          $0 += 1
+          return $0
+        }
+        return makeJWT(["sub": "u", "n": n])
+      }, options: api.options { $0.maxRetries = 0 })
+    try await api.run {
+      _ = try await client.me.check("sso")
+      await #expect(throws: EntitlerError.self) { try await client.me.check("sso") }
+    }
+    #expect(calls.get == 2)
+  }
+
   @Test func aHangingProviderTimesOutAndIsAskedAgainNextTime() async throws {
     let calls = Box(0)
     let api = FakeAPI { _ in .json(Fixture.check()) }

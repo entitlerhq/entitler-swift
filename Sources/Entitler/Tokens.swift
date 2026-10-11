@@ -8,12 +8,6 @@ import Foundation
 public typealias TokenProvider = @Sendable () async throws -> String
 
 enum JWT {
-  static func claims(_ token: String) -> [String: Any]? {
-    let segments = token.split(separator: ".", omittingEmptySubsequences: false)
-    guard segments.count == 3, let payload = Base64URL.decode(segments[1]) else { return nil }
-    return (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any]
-  }
-
   static func lifetime(_ token: String) -> (iat: Int64?, exp: Int64)? {
     struct Lifetime: Decodable {
       let iat: Int64?
@@ -32,7 +26,6 @@ actor TokenSource {
   private let provider: TokenProvider?
   private let blankMessage: String
   private(set) var current: String?
-  private(set) var previous: String?
   private var refreshAt: Date?
   private var refreshing: Task<String, any Error>?
 
@@ -60,22 +53,30 @@ actor TokenSource {
   }
 
   private func refresh(now: Date, timeout: TimeInterval) async throws -> String {
-    let task = refreshing ?? start(timeout: timeout)
-    refreshing = task
-    let token: String
+    let task = refreshing ?? started(timeout: timeout)
     do {
-      token = try await waitCancellably(for: task)
+      let token = try await waitCancellably(for: task)
+      settle(task, outcome: .success(token))
+      return token
     } catch {
-      if refreshing == task, !Task.isCancelled { refreshing = nil }
+      if !Task.isCancelled { settle(task, outcome: .failure(error)) }
       throw error
     }
-    if refreshing == task {
-      refreshing = nil
-      if token != current { previous = current }
-      current = token
-      refreshAt = Self.refreshTime(of: token, receivedAt: Hooks.current.now())
-    }
-    return token
+  }
+
+  private func started(timeout: TimeInterval) -> Task<String, any Error> {
+    let task = start(timeout: timeout)
+    refreshing = task
+    Task { await self.settle(task, outcome: await task.result) }
+    return task
+  }
+
+  private func settle(_ task: Task<String, any Error>, outcome: Result<String, any Error>) {
+    guard refreshing == task else { return }
+    refreshing = nil
+    guard case .success(let token) = outcome else { return }
+    current = token
+    refreshAt = Self.refreshTime(of: token, receivedAt: Hooks.current.now())
   }
 
   private func start(timeout: TimeInterval) -> Task<String, any Error> {

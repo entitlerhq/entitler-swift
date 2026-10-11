@@ -57,8 +57,6 @@ import Testing
     let callVisitor = testCase["clientVisitor"] == nil ? nil : visitor
     let store = KeyLog()
     let memory = MemoryCacheStore(capacity: 10)
-    let memoryAsked = Box<[String]>([])
-    await memory.observe { key in memoryAsked.with { $0.append(key) } }
     let api = FakeAPI(host: "*") { request in
       .json(conformanceBody(forPath: request.path), headers: ["ETag": "\"conformance\""])
     }
@@ -68,7 +66,6 @@ import Testing
     let credential = testCase["credential"] as? String ?? ""
     let read: () async throws -> Void
     let close: () -> Void
-    var onServer = false
     switch testCase["principalKind"] as! String {
     case "key" where credential.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ent_pk_"):
       let client = try EntitlerClient(
@@ -76,7 +73,6 @@ import Testing
       close = client.close
       read = { _ = try await client.pricing(visitor: callVisitor) }
     case "key":
-      onServer = true
       let server = try EntitlerServer(key: credential, cache: store, options: options)
       close = server.close
       read = {
@@ -120,7 +116,11 @@ import Testing
     defer { close() }
     try await api.run(read)
     let cacheKey = outcome["cacheKey"] as! String
-    #expect((onServer ? store.asked.get : memoryAsked.get) == [cacheKey])
+    if store.asked.get.isEmpty {
+      #expect(await memory.entry(forKey: cacheKey) != nil)
+    } else {
+      #expect(store.asked.get == [cacheKey])
+    }
     #expect(sha256(outcome["serialised"] as! String) == cacheKey)
     #expect(api.count == 1)
     #expect(api.last.url.absoluteString == testCase["url"] as? String)

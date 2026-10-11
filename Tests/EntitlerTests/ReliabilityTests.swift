@@ -372,6 +372,47 @@ import Testing
     }
   }
 
+  @Test(arguments: [403, 404, 409])
+  func aProbeEndingInAnotherErrorEndsTheOutage(status: Int) async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+      .error(status, code: "x"), .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+      api.advance(31)
+      await #expect(throws: EntitlerError.self) { try await customer.check("sso") }
+      let fresh = try await customer.check("sso")
+      #expect(!fresh.stale)
+    }
+    #expect(api.count == 4)
+  }
+
+  @Test func aCancelledProbeEndsTheOutage() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+      .hanging, .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
+    let hooks = api.hooks
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+    }
+    api.advance(31)
+    let probe = Task {
+      try await Hooks.$current.withValue(hooks) { try await customer.check("sso") }
+    }
+    while api.count < 3 { await Task.yield() }
+    probe.cancel()
+    _ = await probe.result
+    let fresh = try await api.run { try await customer.check("sso") }
+    #expect(!fresh.stale)
+    #expect(api.count == 4)
+  }
+
   @Test func otherFailuresAreNotHiddenByStaleAnswers() async throws {
     let api = FakeAPI(replies: [
       .json(Fixture.check(), headers: ["ETag": "\"e\""]), .error(403, code: "scope_required"),

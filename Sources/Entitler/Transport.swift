@@ -63,7 +63,6 @@ struct Response: Sendable {
   let etag: String?
   let cacheControl: String?
   let age: Int?
-  let retryAfter: TimeInterval?
   var requestID: String? = nil
   var replayed = false
   var idempotencyKey: String? = nil
@@ -73,6 +72,12 @@ struct Response: Sendable {
 
 struct Named: Decodable {
   let customer: String
+}
+
+enum OutageAnswer: Sendable {
+  case ask
+  case serveKept
+  case probe
 }
 
 actor ClientState {
@@ -95,12 +100,14 @@ actor ClientState {
     return (kept.generation, kept.at)
   }
 
-  func servesFromCache(at now: Date) -> Bool {
-    guard let outageUntil else { return false }
-    if now < outageUntil || probing { return true }
+  func outageAnswer(at now: Date) -> OutageAnswer {
+    guard let outageUntil else { return .ask }
+    if now < outageUntil || probing { return .serveKept }
     probing = true
-    return false
+    return .probe
   }
+
+  func endProbe() { probing = false }
 
   func reachable() {
     outageUntil = nil
@@ -262,11 +269,27 @@ final class Core: Sendable, CustomReflectable {
     {
       return try decode(Response(kept))
     }
-    if let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor,
-      await state.servesFromCache(at: hooks.now())
-    {
-      return markedStale(try decode(Response(kept)))
+    var outage = OutageAnswer.ask
+    if let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor {
+      outage = await state.outageAnswer(at: hooks.now())
+      if outage == .serveKept { return markedStale(try decode(Response(kept))) }
     }
+    do {
+      let answer: Answer = try await askAPI(
+        request, token: token, key: key, kept: kept, started: started.generation, cache: cache)
+      if outage == .probe { await state.endProbe() }
+      return answer
+    } catch {
+      if outage == .probe { await state.endProbe() }
+      throw error
+    }
+  }
+
+  private func askAPI<Answer: Decodable>(
+    _ request: Request, token: String?, key: String, kept: CacheEntry?, started: UInt64,
+    cache: any CacheStore
+  ) async throws -> Answer {
+    let hooks = Hooks.current
     do {
       let response = try await send(request, token: token, ifNoneMatch: kept?.etag)
       var entry: CacheEntry?
@@ -291,7 +314,7 @@ final class Core: Sendable, CustomReflectable {
       let answer: Answer = try decode(entry.map(Response.init) ?? response)
       await state.reachable()
       if var entry {
-        if await state.generation(of: request.customer).generation != started.generation {
+        if await state.generation(of: request.customer).generation != started {
           entry.cacheControl = (entry.cacheControl.map { $0 + ", " } ?? "") + "no-cache"
         }
         await store(entry, key: key, in: cache)
@@ -300,7 +323,9 @@ final class Core: Sendable, CustomReflectable {
     } catch let error as EntitlerError where error.isUnreachable && !error.isTokenError {
       let retryAfter = error.apiError?.retryAfter ?? 0
       await state.unreachable(until: hooks.now().addingTimeInterval(max(30, retryAfter)))
-      guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor else {
+      let sameToken = request.authenticated ? await keptToken() == token : true
+      guard let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor, sameToken
+      else {
         throw error
       }
       report(error)
@@ -495,6 +520,13 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
+  private func keptToken() async -> String? {
+    switch credential {
+    case .server(let key), .publishable(let key): key
+    case .token(let source), .identity(_, let source): await source.current
+    }
+  }
+
   private func refresh(replacing token: String) async throws -> String? {
     switch credential {
     case .server, .publishable: nil
@@ -581,7 +613,7 @@ extension Response {
   init(_ entry: CacheEntry) {
     self.init(
       status: 200, body: Data(entry.body.utf8), etag: entry.etag, cacheControl: entry.cacheControl,
-      age: entry.age, retryAfter: nil)
+      age: entry.age)
   }
 
   init(_ http: HTTPURLResponse, body: Data, now: Date) {
@@ -591,9 +623,6 @@ extension Response {
       etag: http.value(forHTTPHeaderField: "ETag"),
       cacheControl: http.value(forHTTPHeaderField: "Cache-Control"),
       age: http.value(forHTTPHeaderField: "Age").flatMap { Int($0.trimmed) },
-      retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
-        retryAfterSeconds($0, now: now)
-      },
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
       replayed: http.value(forHTTPHeaderField: "Idempotent-Replayed") == "true")
   }
