@@ -176,7 +176,8 @@ struct LiveTests {
         of: Live.aiCredits, amount: 2, idempotencyKey: Live.key("release"))
       #expect(try await released.release().outcome == .released)
       do {
-        _ = try await customer.startHold(of: Live.aiCredits, amount: 4, idempotencyKey: finishedKey)
+        _ = try await customer.startHold(
+          of: Live.aiCredits, amount: 4, idempotencyKey: finishedKey, ttlSeconds: 120)
         Issue.record("Expected the finished hold's key to replay")
       } catch EntitlerError.usageReplayed(let answer) {
         #expect(answer.outcome == .settled)
