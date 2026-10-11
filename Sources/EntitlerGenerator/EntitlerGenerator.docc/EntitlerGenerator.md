@@ -4,7 +4,7 @@ Render typed feature constants from your Entitler catalogue.
 
 ## Overview
 
-`swift run entitler generate` writes a file of `Feature` constants. Build tooling can
+`swift run entitler-cli generate` writes a file of `Feature` constants. Build tooling can
 call the same rendering with ``renderFeatures(_:accessLevel:existingSource:)``.
 
 ## Topics

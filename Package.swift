@@ -9,7 +9,7 @@ let package = Package(
     .library(name: "Entitler", targets: ["Entitler"]),
     .library(name: "EntitlerTesting", targets: ["EntitlerTesting"]),
     .library(name: "EntitlerGenerator", targets: ["EntitlerGenerator"]),
-    .executable(name: "entitler", targets: ["EntitlerCommand"]),
+    .executable(name: "entitler-cli", targets: ["EntitlerCommand"]),
     .plugin(name: "entitler-generate", targets: ["EntitlerGenerate"]),
   ],
   dependencies: [

@@ -1,8 +1,8 @@
 import Entitler
 import Foundation
 
-/// The `entitler` command line: `entitler generate` writes typed feature constants, and
-/// `entitler snapshot-keys` writes the snapshot keys an app ships.
+/// The `entitler-cli` command line: `entitler-cli generate` writes typed feature constants, and
+/// `entitler-cli snapshot-keys` writes the snapshot keys an app ships.
 public enum GeneratorCommand {
   /// The usage text `--help` prints.
   public static let usage = """
@@ -131,7 +131,7 @@ public enum GeneratorCommand {
     let count = list.features.count == 1 ? "1 feature" : "\(list.features.count) features"
     if flags.contains("--check") {
       guard let existing, withoutReadLine(existing) == withoutReadLine(source) else {
-        print("\(file) is out of date. Run entitler generate to update it.")
+        print("\(file) is out of date. Run entitler-cli generate to update it.")
         return 1
       }
       print("\(file) is up to date with \(count).")

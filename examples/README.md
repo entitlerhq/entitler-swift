@@ -20,7 +20,7 @@ in `ENTITLER_KEY`, from this directory:
   with `syncBilling()`, `cancel` and `undoPendingChange`, the billing portal handling `404 not_found`,
   and the company's `setPlan` with `billing: .end` and a grant whose id it keeps.
   `ENTITLER_KEY=ent_test_… swift run billing`
-- `generated-features`: a constants file from `entitler generate`, and code that uses it.
+- `generated-features`: a constants file from `entitler-cli generate`, and code that uses it.
   `ENTITLER_KEY=ent_test_… swift run generated-features`
 - `swiftui-view-model`: a SwiftUI view model gating a button. Build it on macOS or iOS with
   `swift build --target SwiftUIViewModel`.

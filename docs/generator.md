@@ -7,7 +7,7 @@ features.
 ## Generating them
 
 ```sh
-ENTITLER_KEY=ent_live_… swift run entitler generate --out Sources/App/EntitlerFeatures.swift
+ENTITLER_KEY=ent_live_… swift run entitler-cli generate --out Sources/App/EntitlerFeatures.swift
 ```
 
 Or, through the command plugin, from your package's directory (SwiftPM asks once for network
@@ -82,11 +82,11 @@ Build tooling can render the same file with `EntitlerGenerator.renderFeatures(_:
 
 ## Snapshot keys
 
-`entitler snapshot-keys` writes the keys that verify [offline snapshots](offline-snapshots.md), for
+`entitler-cli snapshot-keys` writes the keys that verify [offline snapshots](offline-snapshots.md), for
 your app to ship. It needs no key:
 
 ```sh
-swift run entitler snapshot-keys --out Sources/App/SnapshotKeys.json
+swift run entitler-cli snapshot-keys --out Sources/App/SnapshotKeys.json
 ```
 
 | Option | Default | Meaning |

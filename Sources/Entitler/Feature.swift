@@ -3,23 +3,23 @@ import Foundation
 /// The type of a feature, carried by a ``Feature`` constant so each answer is typed to match.
 public protocol FeatureKind: Sendable {
   /// The answer `check(_:timeout:)` gives for features of this kind.
-  associatedtype Answer: Decodable & Sendable
+  associatedtype Check: Decodable & Sendable
   /// The feature type the API names for this kind.
   static var type: FeatureType { get }
 }
 
 /// A feature that is on or off, such as single sign-on.
 public enum OnOff: FeatureKind {
-  /// Answered with a ``Check``.
-  public typealias Answer = Check
+  /// Answered with a ``Entitler/Check``.
+  public typealias Check = Entitler.Check
   /// ``FeatureType/boolean``.
   public static var type: FeatureType { .boolean }
 }
 
 /// A setting with an amount, such as seats.
 public enum Config: FeatureKind {
-  /// Answered with a ``Check``.
-  public typealias Answer = Check
+  /// Answered with a ``Entitler/Check``.
+  public typealias Check = Entitler.Check
   /// ``FeatureType/config``.
   public static var type: FeatureType { .config }
 }
@@ -27,7 +27,7 @@ public enum Config: FeatureKind {
 /// A feature counted against an allowance, such as AI credits.
 public enum Metered: FeatureKind {
   /// Answered with a ``MeteredCheck``, which carries the meter.
-  public typealias Answer = MeteredCheck
+  public typealias Check = MeteredCheck
   /// ``FeatureType/metered``.
   public static var type: FeatureType { .metered }
 }
@@ -36,15 +36,15 @@ public enum Metered: FeatureKind {
 ///
 /// Named `FeatureGroup` rather than `Group` so it never clashes with SwiftUI's `Group`.
 public enum FeatureGroup: FeatureKind {
-  /// Answered with a ``Check``.
-  public typealias Answer = Check
+  /// Answered with a ``Entitler/Check``.
+  public typealias Check = Entitler.Check
   /// ``FeatureType/group``.
   public static var type: FeatureType { .group }
 }
 
 /// A typed feature constant.
 ///
-/// Generate them with `entitler generate`, or declare one by hand:
+/// Generate them with `entitler-cli generate`, or declare one by hand:
 ///
 /// ```swift
 /// enum Features {

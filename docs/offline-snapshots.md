@@ -25,7 +25,7 @@ Meters in a snapshot are frozen when it is signed: `used` and `remaining` do not
 ## Key pinning
 
 The keys decide which snapshots an app trusts. Ship them with the app, written at build time by
-`swift run entitler snapshot-keys --out Sources/App/SnapshotKeys.json` (see
+`swift run entitler-cli snapshot-keys --out Sources/App/SnapshotKeys.json` (see
 [the command-line tool](generator.md)), and load them from the bundle:
 
 ```swift

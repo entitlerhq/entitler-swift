@@ -26,7 +26,7 @@ All notable changes to this project are documented here. The format follows
 - Timeouts, retries with backoff, idempotency keys on every write with `replayed` on their answers,
   an answer cache honouring `max-age` and `ETag`, and stale answers while Entitler is unreachable.
 - Offline snapshot verification with CryptoKit, or swift-crypto on Linux.
-- The `entitler generate` and `entitler snapshot-keys` commands, and the `entitler-generate`
+- The `entitler-cli generate` and `entitler-cli snapshot-keys` commands, and the `entitler-generate`
   plugin.
 - `EntitlerTesting`: `FakeCustomer` and `FakeAnswers` for apps' own tests.
 

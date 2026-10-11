@@ -189,7 +189,7 @@ let sampleCatalogue = [
     api.answer { [self] _ in catalogue(feature("sso", "boolean")) }
     (code, lines) = await run(["generate", "--out", file, "--check"], api: api)
     #expect(code == 1)
-    #expect(lines == ["\(file) is out of date. Run entitler generate to update it."])
+    #expect(lines == ["\(file) is out of date. Run entitler-cli generate to update it."])
     (code, lines) = await run(["generate", "--out", file, "--access-level", "public"], api: api)
     #expect(lines == ["Wrote 1 feature to \(file)."])
     #expect(try String(contentsOfFile: file, encoding: .utf8).contains("public static let sso"))
@@ -200,7 +200,7 @@ let sampleCatalogue = [
     let file = temporaryFile()
     let (code, lines) = await run(["generate", "--out", file, "--check"], api: api)
     #expect(code == 1)
-    #expect(lines == ["\(file) is out of date. Run entitler generate to update it."])
+    #expect(lines == ["\(file) is out of date. Run entitler-cli generate to update it."])
   }
 
   @Test func usageAndArgumentErrors() async {

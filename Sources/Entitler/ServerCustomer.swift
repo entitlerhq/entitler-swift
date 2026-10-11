@@ -64,7 +64,7 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// - Throws: ``ArgumentError`` when `asOf` is outside the years 0001 to 9999.
   public func check<Kind>(
     _ feature: Feature<Kind>, asOf: Date?, revalidate: Bool = false, timeout: TimeInterval? = nil
-  ) async throws -> Kind.Answer {
+  ) async throws -> Kind.Check {
     try await handle.read(
       ["entitlements", requireFeature(feature.key)], revalidate: revalidate, asOf: asOf,
       timeout: timeout)

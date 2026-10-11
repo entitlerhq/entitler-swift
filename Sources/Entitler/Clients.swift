@@ -589,7 +589,7 @@ public struct SignedInCustomer: Customer, CustomStringConvertible, CustomReflect
   public var customMirror: Mirror { Mirror(self, children: ["path": "me"]) }
 }
 
-/// The public keys that verify snapshots, read with no credential, as `entitler snapshot-keys`
+/// The public keys that verify snapshots, read with no credential, as `entitler-cli snapshot-keys`
 /// reads them.
 package func fetchSnapshotKeys(options: EntitlerOptions) async throws -> SnapshotKeys {
   try await Core(options: options, cache: nil, credential: .server(key: ""), visitor: nil)

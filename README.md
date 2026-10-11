@@ -73,8 +73,8 @@ customer's own billing choices takes `some Customer` and is written once.
 Generate typed constants from your catalogue, so each answer is typed to match its feature:
 
 ```sh
-ENTITLER_KEY=ent_live_… swift run entitler generate --out Sources/App/EntitlerFeatures.swift
-swift run entitler snapshot-keys --out Sources/App/SnapshotKeys.json
+ENTITLER_KEY=ent_live_… swift run entitler-cli generate --out Sources/App/EntitlerFeatures.swift
+swift run entitler-cli snapshot-keys --out Sources/App/SnapshotKeys.json
 ```
 
 ```swift
