@@ -192,6 +192,14 @@ import Testing
       try await customer.setAddOn("extra_seats", quantity: 0, reason: "Deal ended.")
       #expect(api.last.json?["quantity"] as? Int == 0)
       #expect(api.last.json?.keys.sorted() == ["quantity", "reason"])
+      try await customer.setAddOn(
+        "extra_seats", quantity: 5,
+        sku: SKU(connector: "google", ids: ["productId": "extra_seats_monthly"]),
+        actor: "play-store")
+      #expect(api.last.json?.keys.sorted() == ["actor", "quantity", "sku"])
+      let sku = try #require(api.last.json?["sku"] as? [String: Any])
+      #expect(sku["connector"] as? String == "google")
+      #expect(sku["ids"] as? [String: String] == ["productId": "extra_seats_monthly"])
     }
   }
 

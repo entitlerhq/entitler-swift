@@ -46,7 +46,7 @@ to its [snapshot](offline-snapshots.md).
 | `billingPortal` | `not_found` (never billed), `scope_required`, `capability_required` |
 | `syncBilling` | `rate_limited`, `scope_required`, `capability_required`, and `503` while a change is followed |
 | `setPlan` | `payment_required`, `billed_elsewhere`, `customer_not_found`, `invalid_body` |
-| `setAddOn` | `payment_required`, `not_found`, `customer_not_found`, `invalid_body` |
+| `setAddOn` | `payment_required`, `billed_elsewhere`, `not_found`, `customer_not_found`, `invalid_body` |
 
 A failed write's error carries the idempotency key it sent, so you can repeat the call later with
 the same key and it will not act twice. A failed settlement carries the hold's id.

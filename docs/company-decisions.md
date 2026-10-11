@@ -40,7 +40,8 @@ try await customer.setAddOn("extra_seats", quantity: 0)
 
 `setAddOn` adds the add-on when the customer holds none, sets its quantity when they do, and
 removes it at 0 (quantity 0 to 10,000). The change always takes effect now: an add-on change
-cannot be booked for renewal.
+cannot be booked for renewal. An add-on bought in the App Store or Google Play passes its `sku`:
+see [store purchases](store-purchases.md).
 
 ## Grants
 

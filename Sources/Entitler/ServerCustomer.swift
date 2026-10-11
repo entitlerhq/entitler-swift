@@ -304,23 +304,27 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   /// - Parameters:
   ///   - addOn: The add-on, by its key or public id.
   ///   - quantity: From 0 to 10,000.
+  ///   - sku: The App Store or Google Play SKU that sold the add-on, for a verified store
+  ///     purchase: the store is recorded as its biller and Stripe is never charged. Fails with
+  ///     `409 billed_elsewhere` when Stripe bills the product.
   ///   - reason: Why, shown in the customer's activity.
   ///   - actor: The person or system that decided.
   ///   - idempotencyKey: A key naming the event. The SDK generates one otherwise.
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func setAddOn(
-    _ addOn: String, quantity: Int, reason: String? = nil, actor: String? = nil,
+    _ addOn: String, quantity: Int, sku: SKU? = nil, reason: String? = nil, actor: String? = nil,
     idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> PlanChange {
     struct Body: Encodable {
       var quantity: Int
+      var sku: SKU?
       var reason: String?
       var actor: String?
     }
     return try await handle.call(
       "PUT", ["add-ons", require(addOn, Messages.plan)],
-      body: Body(quantity: quantity, reason: reason, actor: actor),
+      body: Body(quantity: quantity, sku: sku, reason: reason, actor: actor),
       idempotencyKey: idempotencyKey, timeout: timeout)
   }
 
