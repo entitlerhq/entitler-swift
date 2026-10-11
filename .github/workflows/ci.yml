@@ -72,7 +72,7 @@ jobs:
           sudo xcode-select -s "$app"
           swift --version
       - name: Build with warnings as errors
-        run: swift build --build-tests -Xswiftc -warnings-as-errors
+        run: swift build --build-tests --enable-code-coverage -Xswiftc -warnings-as-errors
       - name: Unit tests with coverage
         run: swift test --skip-build --skip EntitlerIntegrationTests --enable-code-coverage
       - name: Enforce 90% line coverage
