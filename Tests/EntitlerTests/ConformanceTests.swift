@@ -198,7 +198,7 @@ import Testing
           _ = try await customer.undoPendingChange(addOn: value)
         case "/customers/{id}/add-ons/{addOn}":
           _ = try await customer.setAddOn(
-            value, quantity: (options["quantity"] as! NSNumber).intValue)
+            value, quantity: (options["quantity"] as! NSNumber).int64Value)
         case "/customers/{id}/meters/{feature}/adjustments":
           _ = try await customer.adjustMeter(
             Feature<Metered>(value), by: (options["by"] as! NSNumber).int64Value,

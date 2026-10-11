@@ -108,7 +108,7 @@ struct SnapshotBody: Encodable {
 struct SubscribeBody: Encodable {
   var plan: String
   var period: String?
-  var quantity: Int?
+  var quantity: Int64?
   var returnUrl: URL?
   var register: Bool?
 }
@@ -431,7 +431,7 @@ extension Customer {
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func subscribe(
-    to plan: String, period: String? = nil, quantity: Int? = nil, returnURL: URL? = nil,
+    to plan: String, period: String? = nil, quantity: Int64? = nil, returnURL: URL? = nil,
     register: Bool = false, idempotencyKey: String? = nil, timeout: TimeInterval? = nil
   ) async throws -> SubscribeStep {
     try await handle.call(

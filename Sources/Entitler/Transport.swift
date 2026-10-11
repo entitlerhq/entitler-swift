@@ -559,7 +559,8 @@ final class Core: Sendable, CustomReflectable {
       let raw = object["status"] as? String, case let paymentStatus = PaymentStatus(rawValue: raw),
       [.declined, .requiresAction, .processing, .pending].contains(paymentStatus)
     {
-      payment = Payment(status: paymentStatus, url: object["url"] as? String)
+      payment = Payment(
+        status: paymentStatus, url: (object["url"] as? String).flatMap(URL.init(string:)))
     }
     return APIError(
       status: status,

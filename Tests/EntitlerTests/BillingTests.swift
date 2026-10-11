@@ -75,6 +75,30 @@ import Testing
     }
   }
 
+  @Test func aPaymentNeedingActionCarriesItsPage() async throws {
+    let api = FakeAPI { request in
+      request.path.hasSuffix("add-ons/seats")
+        ? .json(Fixture.planChange())
+        : .json(
+          #"{"error":{"code":"payment_required","message":"Confirm.","payment":{"status":"requires_action","url":"https://pay.stripe.test/3ds"}}}"#,
+          status: 402)
+    }
+    do {
+      _ = try await api.run {
+        try await api.server().customer("u").subscribe(to: "pro", quantity: Int64(2))
+      }
+      Issue.record("Expected an error")
+    } catch EntitlerError.api(let error) {
+      let page: URL? = error.payment?.url
+      #expect(page == URL(string: "https://pay.stripe.test/3ds"))
+    }
+    let added = try await api.run {
+      try await api.server().customer("u").setAddOn("seats", quantity: Int64(3))
+    }
+    #expect(added.quantity == nil)
+    #expect(api.last.json?["quantity"] as? Int == 3)
+  }
+
   @Test func cancelAndUndoTakeAPlanOrAnAddOn() async throws {
     let api = FakeAPI { _ in .json(Fixture.planChange(changed: false)) }
     let customer = try api.server().customer("u")

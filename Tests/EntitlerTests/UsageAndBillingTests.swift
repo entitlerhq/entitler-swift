@@ -476,6 +476,36 @@ import Testing
     }
   }
 
+  @Test func detailsIterateTheirUsageLogAtTheSameInstant() async throws {
+    let event =
+      #"{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","actor":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}"#
+    let api = FakeAPI { request in
+      var detail =
+        try! JSONSerialization.jsonObject(with: Data(Fixture.detail.utf8)) as! [String: Any]
+      let event = try! JSONSerialization.jsonObject(with: Data(event.utf8))
+      detail["usage"] =
+        request.query?.contains("cursor=c2") == true
+        ? ["items": [event], "next": NSNull()] : ["items": [event], "next": "c2"]
+      return .json(
+        String(decoding: try! JSONSerialization.data(withJSONObject: detail), as: UTF8.self))
+    }
+    let customer = try api.server().customer("u")
+    let asOf = Date(timeIntervalSince1970: 1_790_000_000)
+    try await api.run {
+      var iterator = customer.detailsUsageLog(asOf: asOf).makeAsyncIterator()
+      _ = try await iterator.next()
+      #expect(api.count == 1)
+      var count = 1
+      while try await iterator.next() != nil { count += 1 }
+      #expect(count == 2)
+    }
+    #expect(api.count == 2)
+    #expect(api.requests.get.map(\.path) == ["/customers/u", "/customers/u"])
+    #expect(api.requests.get.map(\.query) == [nil, "cursor=c2"])
+    #expect(
+      Set(api.requests.get.map { $0.header("Entitler-As-Of") }) == ["2026-09-21T14:13:20.000Z"])
+  }
+
   @Test func usageLogRequestsPagesOnlyWhenReached() async throws {
     let api = FakeAPI { _ in
       .json(

@@ -228,7 +228,9 @@ enum Shape {
       "retryAfterSeconds": optional(error.retryAfter.map { Int64($0) }),
       "idempotencyKey": optional(error.idempotencyKey),
       "payment": optional(
-        error.payment.map { ["status": name($0.status), "url": optional($0.url)] as JSONObject }),
+        error.payment.map {
+          ["status": name($0.status), "url": optional($0.url?.absoluteString)] as JSONObject
+        }),
     ]
   }
 }

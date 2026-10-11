@@ -24,8 +24,8 @@ public protocol CacheStore: Sendable {
 /// Entries are private to this SDK: sharing a store with SDKs in other languages is not
 /// supported.
 public struct CacheEntry: Codable, Hashable, Sendable {
-  /// The entry format, 1.
-  public var v: Int
+  /// The entry format, 1, kept as `v`.
+  public let formatVersion: Int
   /// The answer's body, as raw JSON text.
   public var body: String
   /// The answer's `ETag`.
@@ -39,12 +39,17 @@ public struct CacheEntry: Codable, Hashable, Sendable {
 
   /// Creates an entry.
   public init(body: String, etag: String?, cacheControl: String?, age: Int?, receivedAt: Date) {
-    v = 1
+    formatVersion = 1
     self.body = body
     self.etag = etag
     self.cacheControl = cacheControl
     self.age = age
     self.receivedAt = receivedAt
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case formatVersion = "v"
+    case body, etag, cacheControl, age, receivedAt
   }
 
   var directives: [String] {

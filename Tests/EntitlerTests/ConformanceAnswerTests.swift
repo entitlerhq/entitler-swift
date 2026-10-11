@@ -141,7 +141,7 @@ extension ConformanceTests {
         case "setAddOn":
           return Self.changeShape(
             try await customer.setAddOn(
-              call["addOn"] as! String, quantity: (call["quantity"] as! NSNumber).intValue,
+              call["addOn"] as! String, quantity: (call["quantity"] as! NSNumber).int64Value,
               idempotencyKey: key))
         case "grant":
           return Self.grantShape(

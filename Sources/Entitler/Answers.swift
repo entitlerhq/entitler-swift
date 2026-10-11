@@ -1365,7 +1365,7 @@ public struct Payment: Codable, Hashable, Sendable {
   /// Why it has not succeeded.
   public let status: PaymentStatus
   /// The provider's page where the customer pays or confirms it.
-  public let url: String?
+  public let url: URL?
 }
 
 extension Check: MeterChecked {

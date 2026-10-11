@@ -165,6 +165,22 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
     return try await handle.core.call(request)
   }
 
+  /// The usage log in ``details(cursor:asOf:timeout:)``, newest first, each page requested only
+  /// when iteration reaches it, every page read at the same `asOf`.
+  ///
+  /// ```swift
+  /// for try await event in customer.detailsUsageLog() {
+  ///   print(event.feature, event.amount)
+  /// }
+  /// ```
+  public func detailsUsageLog(asOf: Date? = nil, timeout: TimeInterval? = nil)
+    -> PagedList<UsageEvent>
+  {
+    PagedList { cursor in
+      try await details(cursor: cursor, asOf: asOf, timeout: timeout).usage
+    }
+  }
+
   /// Changes the customer's name, email or metadata. A `nil` metadata value removes that key.
   @discardableResult
   public func update(
@@ -327,12 +343,12 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   @discardableResult
   public func setAddOn(
-    _ addOn: String, quantity: Int, replaces: String? = nil, sku: SKU? = nil,
+    _ addOn: String, quantity: Int64, replaces: String? = nil, sku: SKU? = nil,
     reason: String? = nil, actor: String? = nil, idempotencyKey: String? = nil,
     timeout: TimeInterval? = nil
   ) async throws -> PlanChange {
     struct Body: Encodable {
-      var quantity: Int
+      var quantity: Int64
       var sku: SKU?
       var replaces: String?
       var reason: String?

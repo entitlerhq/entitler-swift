@@ -351,7 +351,10 @@ extension JSONWebKey {
       body: "{}", etag: "\"e\"", cacheControl: "max-age=30", age: 2,
       receivedAt: Date(timeIntervalSince1970: 0))
     #expect(try JSONDecoder().decode(CacheEntry.self, from: JSONEncoder().encode(entry)) == entry)
-    #expect(entry.v == 1)
+    #expect(entry.formatVersion == 1)
+    let encoded =
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any]
+    #expect(encoded?["v"] as? Int == 1)
     #expect(entry.maxAge == 30)
     #expect(entry.isFresh(at: Date(timeIntervalSince1970: 27)))
     #expect(!entry.isFresh(at: Date(timeIntervalSince1970: 28)))
