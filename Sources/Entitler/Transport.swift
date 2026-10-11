@@ -22,6 +22,8 @@ struct Hooks: Sendable {
   @TaskLocal static var current = Hooks()
 }
 
+typealias CoreCredential = Credential
+
 enum Credential: Sendable {
   case server(key: String)
   case publishable(key: String)

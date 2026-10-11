@@ -144,7 +144,7 @@ extension Customer {
   ///   - timeout: How long each attempt may take, in seconds; the client's timeout when `nil`.
   public func check<Kind>(
     _ feature: Feature<Kind>, revalidate: Bool = false, timeout: TimeInterval? = nil
-  ) async throws -> Kind.Check {
+  ) async throws -> Kind.Answer {
     try await handle.read(
       ["entitlements", requireFeature(feature.key)], revalidate: revalidate, timeout: timeout)
   }

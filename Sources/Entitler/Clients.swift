@@ -401,7 +401,7 @@ public final class EntitlerClient<Credential: ClientCredential>: Sendable, Custo
   let core: Core
 
   init(
-    credential: Entitler.Credential, visitor: String?, cache: MemoryCacheStore?,
+    credential: CoreCredential, visitor: String?, cache: MemoryCacheStore?,
     options: EntitlerOptions
   ) throws {
     core = Core(

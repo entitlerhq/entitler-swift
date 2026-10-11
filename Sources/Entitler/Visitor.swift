@@ -38,20 +38,28 @@ func validIdempotencyKey(
   /// when none is kept. Needs no client: a signed-out screen sends it with the app's sign-up
   /// request, so the server's `register(visitor:)` keeps the person's experiment arm.
   public func storedVisitorID() -> String {
-    let key = "entitler.visitor"
-    if let kept = UserDefaults.standard.string(forKey: key), (try? validVisitor(kept)) != nil {
+    storedVisitorLock.lock()
+    defer { storedVisitorLock.unlock() }
+    if let kept = UserDefaults.standard.string(forKey: storedVisitorKey),
+      (try? validVisitor(kept)) != nil
+    {
       return kept
     }
-    let visitor = newVisitorID()
-    UserDefaults.standard.set(visitor, forKey: key)
+    let visitor = randomVisitorID()
+    UserDefaults.standard.set(visitor, forKey: storedVisitorKey)
     return visitor
   }
 
   /// Forgets the kept visitor id, so the next read creates a new one. Call it at sign-out and at
   /// account deletion, so the next person on a shared device is never linked to the last.
   public func resetStoredVisitor() {
-    UserDefaults.standard.removeObject(forKey: "entitler.visitor")
+    storedVisitorLock.lock()
+    defer { storedVisitorLock.unlock() }
+    UserDefaults.standard.removeObject(forKey: storedVisitorKey)
   }
+
+  private let storedVisitorKey = "entitler.visitor"
+  private let storedVisitorLock = NSLock()
 
   func storedVisitor() -> String { storedVisitorID() }
 #else
