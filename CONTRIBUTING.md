@@ -34,9 +34,11 @@ overlap. The suite never writes the catalogue, tracks or keys.
 
 ## Dependencies
 
-The only runtime dependency is swift-crypto, linked on Linux alone. Its range stops below 4.4.0
-because later releases need Swift tools 6.1 or newer, and SwiftPM 6.0 would fail to resolve
-them.
+The only runtime dependency is swift-crypto, linked on Linux alone, in the range 3.0.0 up to
+5.0.0. Releases from 4.4.0 need Swift tools 6.1 or newer; SwiftPM skips versions whose tools are
+newer than its own, so Swift 6.0 resolves 4.3.1 and newer toolchains take the latest. An app whose
+graph needs swift-crypto 4.4.0 or later resolves with it. `Package.resolved` is resolved with Swift
+6.0, so every CI toolchain builds the same version.
 
 ## Releasing
 
