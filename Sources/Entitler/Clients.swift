@@ -104,6 +104,17 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
         let id: String?
         let late: Bool
         let error: UsageEventError?
+
+        enum CodingKeys: String, CodingKey { case index, outcome, id, late, error }
+
+        init(from decoder: any Decoder) throws {
+          let container = try decoder.container(keyedBy: CodingKeys.self)
+          index = try container.decode(Int.self, forKey: .index)
+          outcome = try container.decode(UsageEventOutcome.self, forKey: .outcome)
+          id = try container.decode(String?.self, forKey: .id)
+          late = try container.decode(Bool.self, forKey: .late)
+          error = try container.decode(UsageEventError?.self, forKey: .error)
+        }
       }
       let results: [Result]
       var replayed = false

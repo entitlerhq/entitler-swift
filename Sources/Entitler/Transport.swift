@@ -247,7 +247,7 @@ final class Core: Sendable, CustomReflectable {
   private func decode<Answer: Decodable>(_ response: Response) throws -> Answer {
     do {
       var answer = try JSON.decoder().decode(Answer.self, from: response.body)
-      if let checked = answer as? any MeterChecked, !checked.hasValidMeters {
+      if let checked = answer as? any ShapeChecked, !checked.hasValidShape {
         throw DecodingError.dataCorrupted(
           DecodingError.Context(codingPath: [], debugDescription: "A meter's remaining is true."))
       }

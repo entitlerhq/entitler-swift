@@ -578,6 +578,142 @@ import Testing
   }
 }
 
+@Suite struct SchemaSweepTests {
+  func decodes<T: Decodable>(_ type: T.Type, _ object: [String: Any]) -> T? {
+    try? JSON.decoder().decode(type, from: JSONSerialization.data(withJSONObject: object))
+  }
+
+  nonisolated(unsafe) static let event: [String: Any] = [
+    "id": "u_1", "feature": "f", "amount": 5, "kind": "adjust", "setTo": 5, "source": "dashboard",
+    "by": "Support key", "actor": "Ada", "reason": "Refund", "at": "2026-10-08T01:47:13Z",
+    "cancelledAt": NSNull(),
+  ]
+
+  @Test func usageEventsAndActivityCarryWhoAndWhy() throws {
+    let event = try #require(decodes(UsageEvent.self, Self.event))
+    #expect(event.by == "Support key")
+    #expect(event.actor == "Ada")
+    #expect(event.reason == "Refund")
+    for key in ["by", "actor", "reason", "cancelledAt", "setTo"] {
+      var missing = Self.event
+      missing[key] = nil
+      #expect(decodes(UsageEvent.self, missing) == nil, "UsageEvent without \(key)")
+    }
+    let entry: [String: Any] = [
+      "text": "Moved to Pro", "at": "2026-10-08T01:47:13Z", "by": NSNull(), "actor": "crm",
+      "reason": "Deal",
+    ]
+    let activity = try #require(decodes(Activity.self, entry))
+    #expect(activity.by == nil)
+    #expect(activity.actor == "crm")
+    for key in ["by", "actor", "reason"] {
+      var missing = entry
+      missing[key] = nil
+      #expect(decodes(Activity.self, missing) == nil, "Activity without \(key)")
+    }
+  }
+
+  @Test func tracksNameTheirEnvironment() throws {
+    let track: [String: Any] = [
+      "customer": "u", "environmentId": "env_1", "track": ["id": "t", "name": "Beta"],
+      "source": "server", "previousTrackId": NSNull(),
+    ]
+    #expect(decodes(CustomerTrack.self, track)?.environmentID == "env_1")
+    var missing = track
+    missing["environmentId"] = nil
+    #expect(decodes(CustomerTrack.self, missing) == nil)
+  }
+
+  @Test func subscriptionsCarryUntilAndOverride() throws {
+    let detail = try JSONSerialization.jsonObject(with: Data(Fixture.detail.utf8)) as! [String: Any]
+    var subscription = detail["subscription"] as! [String: Any]
+    subscription["until"] = "2027-01-01T00:00:00Z"
+    subscription["override"] = [
+      "from": ["id": "p_1", "key": "free", "name": "Free"],
+      "period": ["key": "monthly", "label": "Monthly"],
+      "billedBy": ["provider": "stripe", "connectionId": "conn_1"], "since": "2026-10-01T00:00:00Z",
+      "by": "Support key",
+    ]
+    let decoded = try #require(decodes(Subscription.self, subscription))
+    #expect(decoded.until != nil)
+    #expect(decoded.override?.from.key == "free")
+    #expect(decoded.override?.billedBy?.connectionID == "conn_1")
+    for key in ["until", "override"] {
+      var missing = subscription
+      missing[key] = nil
+      #expect(decodes(Subscription.self, missing) == nil, "Subscription without \(key)")
+    }
+  }
+
+  @Test func meterWindowsCarryTheirAnchor() {
+    #expect(
+      decodes(MeterWindow.self, ["count": 1, "unit": "months", "anchor": "calendar"])?.anchor
+        == .calendar)
+    #expect(decodes(MeterWindow.self, ["count": 1, "unit": "months"])?.anchor == nil)
+  }
+
+  @Test func billingNeedsItsProducts() {
+    let billing: [String: Any] = [
+      "provider": NSNull(), "status": NSNull(), "sku": NSNull(), "items": 0, "drift": NSNull(),
+    ]
+    #expect(decodes(CustomerBilling.self, billing) == nil)
+    var listed = billing
+    listed["products"] = [Any]()
+    #expect(decodes(CustomerBilling.self, listed)?.products == [])
+  }
+
+  @Test func customerEntitlementsNeedUpgrades() {
+    let item: [String: Any] = [
+      "key": "sso", "type": "boolean", "entitled": true, "value": true, "sources": [Any](),
+    ]
+    #expect(decodes(Entitlement.self, item) == nil)
+    var full = item
+    full["upgrades"] = [Any]()
+    #expect(decodes(Entitlement.self, full) != nil)
+  }
+
+  @Test func theManageStepIsAStoreOnly() {
+    #expect(
+      decodes(SubscribeStep.self, ["next": "manage", "billedBy": "apple"])
+        == .manage(billedBy: .apple))
+    #expect(decodes(SubscribeStep.self, ["next": "manage", "billedBy": "stripe"]) == nil)
+  }
+
+  @Test func theCustomerListCarriesItsLimit() async throws {
+    for page in [
+      #"{"items":[],"next":null}"#, #"{"items":[],"next":null,"used":1,"limit":null}"#,
+      #"{"items":[],"next":null,"used":1,"limit":true}"#,
+    ] {
+      let api = FakeAPI { _ in .json(page) }
+      do {
+        var pages = try api.server().customers.list().pages.makeAsyncIterator()
+        _ = try await api.run { try await pages.next() }
+        Issue.record("Expected invalid_response for \(page)")
+      } catch EntitlerError.api(let error) {
+        #expect(error.code == .invalidResponse)
+      }
+    }
+    let api = FakeAPI { _ in .json(#"{"items":[],"next":null,"used":3,"limit":"unlimited"}"#) }
+    var pages = try api.server().customers.list().pages.makeAsyncIterator()
+    let page = try await api.run { try await pages.next() }
+    #expect(page?.limit == .unlimited)
+    #expect(page?.used == 3)
+  }
+
+  @Test func aBatchResultMissingAFieldIsAnInvalidResponse() async throws {
+    let api = FakeAPI { _ in
+      .json(#"{"results":[{"index":0,"outcome":"recorded","late":false,"error":null}]}"#)
+    }
+    let batch = try await api.run {
+      try await api.server().recordUsageBatch([
+        UsageBatchEvent(
+          customer: "u", feature: Feature<Metered>("f"), amount: 1, idempotencyKey: "a")
+      ])
+    }
+    #expect(batch.results.map(\.error?.code) == [.invalidResponse])
+  }
+}
+
 @Suite struct BookkeepingTests {
   @Test func writesKeepNoPerCustomerStateWithTheCacheOff() async throws {
     let api = FakeAPI { _ in .json(Fixture.planChange()) }

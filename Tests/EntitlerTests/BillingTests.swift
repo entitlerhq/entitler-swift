@@ -389,7 +389,7 @@ import Testing
         )
       case ("PUT", _):
         .json(
-          #"{"customer":"u","track":{"id":"t2","name":"Beta"},"source":"server","previousTrackId":"t1"}"#
+          #"{"customer":"u","environmentId":"env_1","track":{"id":"t2","name":"Beta"},"source":"server","previousTrackId":"t1"}"#
         )
       case ("DELETE", _): Reply(status: 204)
       default: .json(Fixture.summary)
@@ -446,7 +446,7 @@ import Testing
     let billing = try await api.run { try await api.server().customer("u").billing() }
     #expect(billing.status == .pastDue)
     #expect(billing.sku?.period?.label == "Monthly")
-    #expect(billing.products?.first?.status == .active)
+    #expect(billing.products.first?.status == .active)
   }
 
   @Test func customersListAndCreate() async throws {

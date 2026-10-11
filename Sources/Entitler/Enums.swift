@@ -414,6 +414,35 @@ public enum PlanStatus: RawRepresentable, Hashable, Sendable, Codable {
   }
 }
 
+/// Where a meter's windows start.
+public enum MeterAnchor: RawRepresentable, Hashable, Sendable, Codable {
+  /// From the start of the customer's billing period, the period's end closing the last window
+  /// early.
+  case period
+  /// On calendar boundaries in the project's time zone.
+  case calendar
+  /// A value this SDK does not know yet.
+  case unknown(String)
+
+  /// Creates the value from the API's string.
+  public init(rawValue: String) {
+    switch rawValue {
+    case "period": self = .period
+    case "calendar": self = .calendar
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  /// The API's string.
+  public var rawValue: String {
+    switch self {
+    case .period: "period"
+    case .calendar: "calendar"
+    case .unknown(let value): value
+    }
+  }
+}
+
 /// A unit of a billing period or meter window.
 public enum TimeUnit: RawRepresentable, Hashable, Sendable, Codable {
   /// Hours.

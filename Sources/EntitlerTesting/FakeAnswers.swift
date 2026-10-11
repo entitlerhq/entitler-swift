@@ -206,7 +206,7 @@ public enum FakeAnswers {
   /// A customer's place on a track.
   public static func customerTrack(customer: String = "user_1", track: String?) -> Data {
     json([
-      "customer": customer,
+      "customer": customer, "environmentId": "env_test",
       "track": ["id": "track_\(track ?? "all")", "name": track ?? "All customers"],
       "source": "server", "previousTrackId": NSNull(),
     ])
@@ -256,7 +256,9 @@ public enum FakeAnswers {
       ],
       "addOns": [Any](), "entitlements": [Any](), "banked": [String: Any](),
       "moveOptions": [Any](), "grants": [Any](), "usage": ["items": [Any](), "next": NSNull()],
-      "activity": [["text": "Registered", "at": now]],
+      "activity": [
+        ["text": "Registered", "at": now, "by": NSNull(), "actor": NSNull(), "reason": NSNull()]
+      ],
       "environment": ["id": "env_test", "name": "development", "kind": "test"],
     ])
   }

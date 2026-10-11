@@ -87,6 +87,10 @@ public struct Upgrade: Codable, Hashable, Sendable {
   public let action: MoveAction
   /// Why the move is ``MoveAction/unavailable``, a sentence for the developer; else `nil`.
   public let reason: String?
+
+  enum CodingKeys: String, CodingKey {
+    case plan, name, move, action, reason
+  }
 }
 
 /// A billing period: the stable ``key`` writes take, and the ``label`` to show.
@@ -221,7 +225,8 @@ public struct Entitlement: Codable, Hashable, Sendable {
     case key, type, entitled, value, sources, used, held, remaining, resetsAt, upgrades
   }
 
-  /// Decodes an entitlement; a snapshot's claims never carry `upgrades`, so any there are ignored.
+  /// Decodes an entitlement, which needs `upgrades`; a snapshot's claims carry none, so any there
+  /// are ignored.
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     key = try container.decode(String.self, forKey: .key)
@@ -235,7 +240,7 @@ public struct Entitlement: Codable, Hashable, Sendable {
     resetsAt = try container.decodeIfPresent(Date.self, forKey: .resetsAt)
     upgrades =
       decoder.userInfo[.snapshotClaims] != nil
-      ? [] : try container.decodeIfPresent([Upgrade].self, forKey: .upgrades) ?? []
+      ? [] : try container.decode([Upgrade].self, forKey: .upgrades)
   }
 }
 
@@ -401,6 +406,10 @@ public struct ProviderPrice: Codable, Hashable, Sendable {
   public let intervalCount: Int64
   /// Whether the amount includes tax.
   public let tax: TaxBehaviour
+
+  enum CodingKeys: String, CodingKey {
+    case amount, currency, interval, intervalCount, tax
+  }
 }
 
 /// A way to buy a plan through a connector, such as a Stripe price or an App Store product.
@@ -413,6 +422,10 @@ public struct OfferedSKU: Codable, Hashable, Sendable {
   public let ids: [String: String]
   /// The price, when the provider reports one.
   public let price: ProviderPrice?
+
+  enum CodingKeys: String, CodingKey {
+    case period, connector, ids, price
+  }
 }
 
 /// A plan or add-on a customer can move to, in ``CustomerPlans``: one button on a paywall or a
@@ -439,6 +452,10 @@ public struct MoveOption: Codable, Hashable, Sendable {
   public let impact: [Impact]
   /// The ways to buy it.
   public let skus: [OfferedSKU]
+
+  enum CodingKeys: String, CodingKey {
+    case plan, product, from, move, action, reason, when, periods, impact, skus
+  }
 }
 
 /// The plans and add-ons a customer holds, and every one they can move to.
@@ -479,6 +496,10 @@ public struct PublishedProduct: Codable, Hashable, Sendable {
   public let name: String
   /// The key of the product's default plan.
   public let defaultPlan: String?
+
+  enum CodingKeys: String, CodingKey {
+    case key, name, defaultPlan
+  }
 }
 
 /// A billing period a plan is sold for.
@@ -520,6 +541,10 @@ public struct ChannelListing: Codable, Hashable, Sendable {
   public let ids: [String: String]?
   /// For Stripe, the price read through the connection.
   public let price: ProviderPrice?
+
+  enum CodingKeys: String, CodingKey {
+    case channel, name, mode, purchasable, ids, price
+  }
 }
 
 /// How one billing period of a plan sells on each connection.
@@ -528,6 +553,10 @@ public struct PeriodListing: Codable, Hashable, Sendable {
   public let period: Period?
   /// One entry per connection, oldest first.
   public let channels: [ChannelListing]
+
+  enum CodingKeys: String, CodingKey {
+    case period, channels
+  }
 }
 
 /// A plan on sale, in ``Pricing``.
@@ -607,6 +636,9 @@ public struct MeterWindow: Codable, Hashable, Sendable {
   public let count: Int64
   /// The unit.
   public let unit: TimeUnit
+  /// Where windows start, when the feature sets it: ``MeterAnchor/period`` (the default) or
+  /// ``MeterAnchor/calendar``.
+  public let anchor: MeterAnchor?
 }
 
 /// A feature on sale, in ``FeatureList``.
@@ -629,6 +661,10 @@ public struct FeatureListing: Codable, Hashable, Sendable {
   public let archived: Bool
   /// For a group, its direct members' keys.
   public let includes: [String]
+
+  enum CodingKeys: String, CodingKey {
+    case id, key, name, type, description, unit, resetEvery, archived, includes
+  }
 }
 
 /// The features of the catalogue the All customers track serves.
@@ -677,12 +713,21 @@ public struct UsageEvent: Codable, Hashable, Sendable {
   public let setTo: Int64?
   /// Where it was reported from.
   public let source: UsageSource
-  /// Who reported it, when the credential may know.
+  /// The name of the key or person that recorded it, or `nil`.
+  public let by: String?
+  /// The person or system that decided an adjustment, or the cancel of a report, as the write
+  /// named it, or `nil`.
   public let actor: String?
+  /// Why the adjustment, or the cancel of a report, was made, or `nil`.
+  public let reason: String?
   /// When it was recorded.
   public let at: Date
   /// When the report was cancelled, or `nil` while it stands.
   public let cancelledAt: Date?
+
+  enum CodingKeys: String, CodingKey {
+    case id, feature, amount, kind, setTo, source, by, actor, reason, at, cancelledAt
+  }
 }
 
 /// One metered feature's use, in ``CustomerUsage``.
@@ -705,6 +750,10 @@ public struct FeatureUsage: Codable, Hashable, Sendable {
   public let remaining: FeatureValue?
   /// When the meter resets.
   public let resetsAt: Date?
+
+  enum CodingKeys: String, CodingKey {
+    case feature, type, entitled, value, sources, used, held, remaining, resetsAt
+  }
 }
 
 /// A customer's meters and the first page of their usage log.
@@ -953,6 +1002,10 @@ public struct HeldAddOn: Codable, Hashable, Sendable {
   public let movingTo: PlanRef?
   /// Where it was bought.
   public let purchase: Purchase
+
+  enum CodingKeys: String, CodingKey {
+    case plan, version, quantity, countable, addedAt, movingTo, purchase
+  }
 }
 
 /// The provider's billing period for a subscription.
@@ -967,6 +1020,10 @@ public struct ProviderPeriod: Codable, Hashable, Sendable {
   public let trialEndsAt: Date?
   /// When the provider cancels it.
   public let cancelsAt: Date?
+
+  enum CodingKeys: String, CodingKey {
+    case provider, startsAt, endsAt, trialEndsAt, cancelsAt
+  }
 }
 
 /// A customer's subscription in one product.
@@ -991,8 +1048,37 @@ public struct Subscription: Codable, Hashable, Sendable {
   public let addOns: [HeldAddOn]
   /// A change booked for the end of the period.
   public let pending: PendingChange?
+  /// When the customer returns to the default plan, as `setPlan`'s `until` set it, or `nil`.
+  public let until: Date?
+  /// The override that put them on this plan, with ``BillingMode/keep``, until a later `setPlan`
+  /// ends it, or `nil`.
+  public let override: PlanOverride?
   /// Where it was bought.
   public let purchase: Purchase
+
+  enum CodingKeys: String, CodingKey {
+    case product, plan, version, cohort, period, startedAt, renewsAt, billing, addOns, pending,
+      until, override, purchase
+  }
+}
+
+/// A plan held in Entitler only, with ``BillingMode/keep``, while the payment provider keeps
+/// billing the plan held before.
+public struct PlanOverride: Codable, Hashable, Sendable {
+  /// The plan held before the override.
+  public let from: PlanRef
+  /// The billing period of the plan held before, or `nil` for none.
+  public let period: Period?
+  /// The connection that kept billing the plan held before, or `nil` when nothing billed it.
+  public let billedBy: Channel?
+  /// When the override was made.
+  public let since: Date
+  /// Who made the override.
+  public let by: String
+
+  enum CodingKeys: String, CodingKey {
+    case from, period, billedBy, since, by
+  }
 }
 
 /// A customer's holdings in one product.
@@ -1003,6 +1089,10 @@ public struct ProductHolding: Codable, Hashable, Sendable {
   public let defaultPlan: PlanRef?
   /// The subscription held in it.
   public let subscription: Subscription?
+
+  enum CodingKeys: String, CodingKey {
+    case product, defaultPlan, subscription
+  }
 }
 
 /// A grant of a feature beyond the customer's plan.
@@ -1146,7 +1236,13 @@ public enum SubscribeStep: Codable, Hashable, Sendable, Replaying {
     case "done": self = .done(try PlanChange(from: decoder))
     case "pay": self = .pay(try container.decode(URL.self, forKey: .url))
     case "confirming": self = .confirming
-    case "manage": self = .manage(billedBy: try container.decode(Provider.self, forKey: .billedBy))
+    case "manage":
+      let store = try container.decode(Provider.self, forKey: .billedBy)
+      guard store != .stripe else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .billedBy, in: container, debugDescription: "Only a store bills a manage step.")
+      }
+      self = .manage(billedBy: store)
     default: self = .unknown(next)
     }
   }
@@ -1197,6 +1293,16 @@ public struct Activity: Codable, Hashable, Sendable {
   public let text: String
   /// When.
   public let at: Date
+  /// The name of the key or person that made the change, or `nil` for one that came with time.
+  public let by: String?
+  /// The person or system that decided, as the write named it, or `nil`.
+  public let actor: String?
+  /// Why, as the write gave it, or `nil`.
+  public let reason: String?
+
+  enum CodingKeys: String, CodingKey {
+    case text, at, by, actor, reason
+  }
 }
 
 /// A customer in full: subscriptions, entitlements, grants, usage log and activity.
@@ -1241,6 +1347,8 @@ public struct CustomerDetail: Codable, Hashable, Sendable, Replaying {
 public struct CustomerTrack: Codable, Hashable, Sendable, Replaying {
   /// The customer's external id.
   public let customer: String
+  /// The customer's environment.
+  public let environmentID: String
   /// Their track.
   public let track: Track
   /// Who put them there.
@@ -1252,6 +1360,7 @@ public struct CustomerTrack: Codable, Hashable, Sendable, Replaying {
 
   enum CodingKeys: String, CodingKey {
     case customer, track, source
+    case environmentID = "environmentId"
     case previousTrackID = "previousTrackId"
   }
 }
@@ -1264,6 +1373,10 @@ public struct BillingDrift: Codable, Hashable, Sendable {
   public let heldPlan: String?
   /// When the drift was seen.
   public let observedAt: Date
+
+  enum CodingKeys: String, CodingKey {
+    case billedPlan, heldPlan, observedAt
+  }
 }
 
 /// How the provider bills one product.
@@ -1278,6 +1391,10 @@ public struct ProductBilling: Codable, Hashable, Sendable {
   public let items: Int64
   /// Any drift.
   public let drift: BillingDrift?
+
+  enum CodingKeys: String, CodingKey {
+    case product, status, sku, items, drift
+  }
 }
 
 /// Whether a payment provider bills the customer, and how.
@@ -1293,7 +1410,11 @@ public struct CustomerBilling: Codable, Hashable, Sendable {
   /// Any drift.
   public let drift: BillingDrift?
   /// Every subscription the provider bills, by product.
-  public let products: [ProductBilling]?
+  public let products: [ProductBilling]
+
+  enum CodingKeys: String, CodingKey {
+    case provider, status, sku, items, drift, products
+  }
 }
 
 /// The payment provider's page: the billing portal.
@@ -1366,34 +1487,42 @@ public struct Payment: Codable, Hashable, Sendable {
   public let status: PaymentStatus
   /// The provider's page where the customer pays or confirms it.
   public let url: URL?
+
+  enum CodingKeys: String, CodingKey {
+    case status, url
+  }
 }
 
-extension Check: MeterChecked {
-  var hasValidMeters: Bool { remaining.isMeterAmount }
+extension Page: ShapeChecked where Item == CustomerSummary {
+  var hasValidShape: Bool { used != nil && limit != nil && limit != .on }
 }
 
-extension MeteredCheck: MeterChecked {
-  var hasValidMeters: Bool { remaining != .on }
+extension Check: ShapeChecked {
+  var hasValidShape: Bool { remaining.isMeterAmount }
 }
 
-extension Entitlement: MeterChecked {
-  var hasValidMeters: Bool { remaining.isMeterAmount }
+extension MeteredCheck: ShapeChecked {
+  var hasValidShape: Bool { remaining != .on }
 }
 
-extension Entitlements: MeterChecked {
-  var hasValidMeters: Bool { items.allSatisfy(\.hasValidMeters) }
+extension Entitlement: ShapeChecked {
+  var hasValidShape: Bool { remaining.isMeterAmount }
 }
 
-extension FeatureUsage: MeterChecked {
-  var hasValidMeters: Bool { remaining.isMeterAmount }
+extension Entitlements: ShapeChecked {
+  var hasValidShape: Bool { items.allSatisfy(\.hasValidShape) }
 }
 
-extension CustomerUsage: MeterChecked {
-  var hasValidMeters: Bool { features.allSatisfy(\.hasValidMeters) }
+extension FeatureUsage: ShapeChecked {
+  var hasValidShape: Bool { remaining.isMeterAmount }
 }
 
-extension UsageResult: MeterChecked {
-  var hasValidMeters: Bool { remaining.isMeterAmount }
+extension CustomerUsage: ShapeChecked {
+  var hasValidShape: Bool { features.allSatisfy(\.hasValidShape) }
+}
+
+extension UsageResult: ShapeChecked {
+  var hasValidShape: Bool { remaining.isMeterAmount }
 }
 
 extension Check.CodingKeys: RequiredNullableKeys {
@@ -1405,7 +1534,7 @@ extension MeteredCheck.CodingKeys: RequiredNullableKeys {
 }
 
 extension Entitlements.CodingKeys: RequiredNullableKeys {
-  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+  static let requiredNullable: Set<String> = ["change", "environment", "experiment", "release"]
 }
 
 extension CustomerPlans.CodingKeys: RequiredNullableKeys {
@@ -1413,7 +1542,9 @@ extension CustomerPlans.CodingKeys: RequiredNullableKeys {
 }
 
 extension Pricing.CodingKeys: RequiredNullableKeys {
-  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+  static let requiredNullable: Set<String> = [
+    "change", "customer", "defaultPlan", "experiment", "release",
+  ]
 }
 
 extension FeatureList.CodingKeys: RequiredNullableKeys {
@@ -1427,7 +1558,9 @@ extension CustomerUsage.CodingKeys: RequiredNullableKeys {
 }
 
 extension UsageResult.CodingKeys: RequiredNullableKeys {
-  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+  static let requiredNullable: Set<String> = [
+    "change", "experiment", "expiresAt", "holdId", "id", "occurredAt", "refusal", "release",
+  ]
 }
 
 extension Purchase.CodingKeys: RequiredNullableKeys {
@@ -1436,10 +1569,108 @@ extension Purchase.CodingKeys: RequiredNullableKeys {
 
 extension HeldPlan.CodingKeys: RequiredNullableKeys {
   static let requiredNullable: Set<String> = [
-    "product", "version", "period", "pending", "billedBy",
+    "billedBy", "pending", "period", "product", "renewsAt", "version",
   ]
 }
 
 extension PlanChange.CodingKeys: RequiredNullableKeys {
-  static let requiredNullable: Set<String> = ["until"]
+  static let requiredNullable: Set<String> = ["plan", "product", "quantity", "until"]
+}
+
+extension Upgrade.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["reason"]
+}
+
+extension ProviderPrice.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["interval"]
+}
+
+extension OfferedSKU.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["period"]
+}
+
+extension MoveOption.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["product", "from", "reason"]
+}
+
+extension PublishedProduct.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["defaultPlan"]
+}
+
+extension PeriodListing.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["period"]
+}
+
+extension PricingPlan.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["product", "version"]
+}
+
+extension FeatureListing.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["resetEvery"]
+}
+
+extension UsageEvent.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["setTo", "by", "actor", "reason", "cancelledAt"]
+}
+
+extension FeatureUsage.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["remaining", "resetsAt"]
+}
+
+extension CustomerSummary.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["plan", "defaultPlan"]
+}
+
+extension HeldAddOn.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["movingTo"]
+}
+
+extension ProviderPeriod.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["trialEndsAt", "cancelsAt"]
+}
+
+extension Subscription.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = [
+    "cohort", "period", "billing", "pending", "until", "override",
+  ]
+}
+
+extension PlanOverride.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["period", "billedBy"]
+}
+
+extension ProductHolding.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["defaultPlan", "subscription"]
+}
+
+extension Activity.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["by", "actor", "reason"]
+}
+
+extension CustomerDetail.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["subscription", "defaultPlan"]
+}
+
+extension CustomerTrack.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["source", "previousTrackId"]
+}
+
+extension BillingDrift.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["heldPlan"]
+}
+
+extension ProductBilling.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["product", "status", "sku", "drift"]
+}
+
+extension CustomerBilling.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["provider", "status", "sku", "drift"]
+}
+
+extension Payment.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["url"]
+}
+
+extension ChannelListing.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["mode", "ids"]
 }

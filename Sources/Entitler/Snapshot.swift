@@ -174,7 +174,7 @@ func verifiedSnapshot(_ token: String, expecting expected: SnapshotExpectation) 
     let claims = try? claimsDecoder().decode(SnapshotClaims.self, from: payload),
     let fields = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
     fields.keys.contains("release"), fields.keys.contains("change"),
-    claims.entitlements.allSatisfy(\.hasValidMeters)
+    claims.entitlements.allSatisfy(\.hasValidShape)
   else { throw malformed }
   let instants = -62_135_596_800...253_402_300_799 as ClosedRange<Int64>
   guard instants.contains(claims.iat), instants.contains(claims.exp) else { throw malformed }

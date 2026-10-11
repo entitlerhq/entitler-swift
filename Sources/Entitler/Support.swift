@@ -70,8 +70,8 @@ protocol StaleMarking {
   var stale: Bool { get set }
 }
 
-protocol MeterChecked {
-  var hasValidMeters: Bool { get }
+protocol ShapeChecked {
+  var hasValidShape: Bool { get }
 }
 
 extension Optional where Wrapped == FeatureValue {

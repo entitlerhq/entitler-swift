@@ -451,9 +451,9 @@ import Testing
 
   @Test func usageAndItsLogPage() async throws {
     let pages = [
-      #"{"items":[{"id":"u_1","feature":"ai_credits","amount":3,"kind":"use","setTo":null,"source":"client","actor":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}],"next":"c2"}"#,
+      #"{"items":[{"id":"u_1","feature":"ai_credits","amount":3,"kind":"use","setTo":null,"source":"client","by":null,"actor":null,"reason":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}],"next":"c2"}"#,
       #"{"items":[],"next":"c3"}"#,
-      #"{"items":[{"id":"u_2","feature":"ai_credits","amount":5,"kind":"adjust","setTo":5,"source":"dashboard","actor":"Ada","at":"2026-10-08T01:47:13Z","cancelledAt":"2026-10-08T02:00:00Z"}],"next":null}"#,
+      #"{"items":[{"id":"u_2","feature":"ai_credits","amount":5,"kind":"adjust","setTo":5,"source":"dashboard","by":null,"actor":"Ada","reason":null,"at":"2026-10-08T01:47:13Z","cancelledAt":"2026-10-08T02:00:00Z"}],"next":null}"#,
     ]
     let api = FakeAPI { request in
       let index = request.query == nil ? 0 : request.query == "cursor=c2" ? 1 : 2
@@ -478,7 +478,7 @@ import Testing
 
   @Test func detailsIterateTheirUsageLogAtTheSameInstant() async throws {
     let event =
-      #"{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","actor":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}"#
+      #"{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","by":null,"actor":null,"reason":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}"#
     let api = FakeAPI { request in
       var detail =
         try! JSONSerialization.jsonObject(with: Data(Fixture.detail.utf8)) as! [String: Any]
@@ -509,7 +509,7 @@ import Testing
   @Test func usageLogRequestsPagesOnlyWhenReached() async throws {
     let api = FakeAPI { _ in
       .json(
-        #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","metersStartAgainAt":null,"features":[],"log":{"items":[{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","actor":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}],"next":"more"},\#(Fixture.context)}"#
+        #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","metersStartAgainAt":null,"features":[],"log":{"items":[{"id":"u_1","feature":"f","amount":1,"kind":"use","setTo":null,"source":"api","by":null,"actor":null,"reason":null,"at":"2026-10-09T01:47:13Z","cancelledAt":null}],"next":"more"},\#(Fixture.context)}"#
       )
     }
     let customer = try api.server().customer("u")
