@@ -465,7 +465,9 @@ extension Customer {
   }
 
   /// Undoes the change booked for the customer's renewal (a move or a cancel), on their plan or on
-  /// the add-on `addOn` names. Nothing pending answers ``PlanChange/changed`` false.
+  /// the add-on `addOn` names. Nothing pending answers ``PlanChange/changed`` false. A change of
+  /// who bills the plan (``PendingChange/billing(_:)``) is the company's: undoing it in an app fails
+  /// with `403 not_self_serve`.
   ///
   /// - Throws: ``ArgumentError`` when given both `addOn` and `product`, or a blank `addOn`.
   @discardableResult

@@ -109,7 +109,8 @@ try await customer.undoPendingChange(addOn: "sso_addon")
 Each answers a `PlanChange`: the plan or add-on it leaves the customer on, `effective` (`now` or
 `renewal`) and `at`, and `changed`, false when there was nothing to change. Pass `product:` when
 the customer holds plans in several products, or `addOn:`, never both. A cancel the customer may
-not make, such as of a sales-led plan, fails with `403 not_self_serve`.
+not make, such as of a sales-led plan, fails with `403 not_self_serve`, and so does undoing a
+pending `.billing` change in an app: the company booked it, so only your server can undo it.
 
 ## The billing portal
 
