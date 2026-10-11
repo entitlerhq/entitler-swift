@@ -35,6 +35,9 @@ for option in plans.options {
 - `periods` name each billing period by a stable `key` (`monthly`) that writes take, with a
   `label` to show.
 - `skus` are the products to buy through StoreKit; see [store purchases](store-purchases.md).
+- A held plan's `pending` is the change booked for its renewal: `.move(to:)` another plan,
+  `.cancel(movingTo:)` the default plan (or none), `.billing(_:)` when who bills it changes
+  (`.provider`, `.outside` or `.store`), or `.unknown` for a change this version does not know.
 - A held plan's `billedBy` decides where the customer manages it: Apple's or Google's own page for
   a store plan, `billingPortal(returnURL:)` for Stripe.
 

@@ -213,6 +213,7 @@ extension ConformanceTests {
     case nil: NSNull()
     case .move(let plan): ["type": "move", "plan": Shape.plan(plan)]
     case .cancel(let plan): ["type": "cancel", "movingTo": Shape.plan(plan)]
+    case .billing(let biller): ["type": "billing", "billing": Shape.name(biller)]
     case .unknown(let type): ["type": ["unknown": type]]
     }
   }

@@ -937,3 +937,35 @@ public enum EntitlementSourceType: RawRepresentable, Hashable, Sendable, Codable
     }
   }
 }
+
+/// Who bills a plan from a booked renewal on.
+public enum PlanBiller: RawRepresentable, Hashable, Sendable, Codable {
+  /// The payment provider that bills the product.
+  case provider
+  /// No payment provider, as with an invoiced contract.
+  case outside
+  /// The App Store or Google Play.
+  case store
+  /// A value this SDK does not know yet.
+  case unknown(String)
+
+  /// Creates the value from the API's string.
+  public init(rawValue: String) {
+    switch rawValue {
+    case "provider": self = .provider
+    case "outside": self = .outside
+    case "store": self = .store
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  /// The API's string for the value.
+  public var rawValue: String {
+    switch self {
+    case .provider: "provider"
+    case .outside: "outside"
+    case .store: "store"
+    case .unknown(let value): value
+    }
+  }
+}

@@ -314,11 +314,14 @@ public enum PendingChange: Codable, Hashable, Sendable {
   case move(to: PlanRef)
   /// A cancellation, moving to the product's default plan, or to none.
   case cancel(movingTo: PlanRef?)
-  /// A change this SDK does not know yet.
+  /// A change of who bills the plan from renewal, such as a `setPlan` with ``BillingMode/end``
+  /// booked for renewal.
+  case billing(PlanBiller)
+  /// A change this SDK does not know yet, by its `type`.
   case unknown(String)
 
   enum CodingKeys: String, CodingKey {
-    case type, plan, movingTo
+    case type, plan, movingTo, billing
   }
 
   /// Decodes the change from its `type`.
@@ -329,6 +332,7 @@ public enum PendingChange: Codable, Hashable, Sendable {
     case "move": self = .move(to: try container.decode(PlanRef.self, forKey: .plan))
     case "cancel":
       self = .cancel(movingTo: try container.decodeIfPresent(PlanRef.self, forKey: .movingTo))
+    case "billing": self = .billing(try container.decode(PlanBiller.self, forKey: .billing))
     default: self = .unknown(type)
     }
   }
@@ -343,6 +347,9 @@ public enum PendingChange: Codable, Hashable, Sendable {
     case .cancel(let plan):
       try container.encode("cancel", forKey: .type)
       try container.encode(plan, forKey: .movingTo)
+    case .billing(let biller):
+      try container.encode("billing", forKey: .type)
+      try container.encode(biller, forKey: .billing)
     case .unknown(let type):
       try container.encode(type, forKey: .type)
     }

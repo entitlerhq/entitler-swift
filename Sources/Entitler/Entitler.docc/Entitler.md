@@ -86,6 +86,7 @@ if await customer.isEntitled(to: Features.exportPDF, default: false) {
 - ``CustomerPlans``
 - ``HeldPlan``
 - ``PendingChange``
+- ``PlanBiller``
 - ``MoveOption``
 - ``OptionPlan``
 - ``Move``

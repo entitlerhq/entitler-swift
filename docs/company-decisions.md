@@ -23,6 +23,7 @@ try await customer.setPlan(
   the provider's subscription when the change takes effect, and the customer then holds the plan
   outside any provider, as with an invoiced contract. Moving a Stripe payer onto invoiced
   Enterprise is that one write.
+  Booked for renewal, `.end` shows in `plans()` as the held plan's `pending` `.billing(.outside)`.
 - `when: .now` or `.end` (at renewal); the project's policy when left out.
 - `until:` returns the customer to the product's default plan at that instant, unless a later
   `setPlan` moves them or sets a later `until`. While Stripe bills the product it needs

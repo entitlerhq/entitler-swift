@@ -483,6 +483,29 @@ import Testing
     #expect(plans.options[1].reason == "Not yet.")
   }
 
+  @Test func everyBookedChangeDecodes() throws {
+    func pending(_ json: String) throws -> PendingChange {
+      try JSON.decoder().decode(PendingChange.self, from: Data(json.utf8))
+    }
+    #expect(
+      try pending(#"{"type":"move","plan":{"id":"p_2","key":"pro","name":"Pro"}}"#)
+        == .move(
+          to: PlanRef(id: "p_2", key: "pro", name: "Pro", kind: nil, version: nil, product: nil)))
+    #expect(
+      try pending(#"{"type":"cancel","movingTo":{"id":"p_1","key":"free","name":"Free"}}"#)
+        == .cancel(
+          movingTo: PlanRef(
+            id: "p_1", key: "free", name: "Free", kind: nil, version: nil, product: nil)))
+    #expect(try pending(#"{"type":"cancel","movingTo":null}"#) == .cancel(movingTo: nil))
+    #expect(try pending(#"{"type":"billing","billing":"outside"}"#) == .billing(.outside))
+    #expect(try pending(#"{"type":"billing","billing":"provider"}"#) == .billing(.provider))
+    #expect(try pending(#"{"type":"billing","billing":"store"}"#) == .billing(.store))
+    #expect(try pending(#"{"type":"billing","billing":"barter"}"#) == .billing(.unknown("barter")))
+    #expect(try pending(#"{"type":"pause","until":"2026-12-01T00:00:00Z"}"#) == .unknown("pause"))
+    let encoded = try JSONEncoder().encode(PendingChange.billing(.outside))
+    #expect(try pending(String(decoding: encoded, as: UTF8.self)) == .billing(.outside))
+  }
+
   @Test func entitlementsGetAndHas() async throws {
     let api = FakeAPI { _ in .json(Fixture.entitlements) }
     let entitlements = try await api.run { try await api.server().customer("u").entitlements() }
