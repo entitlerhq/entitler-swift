@@ -140,18 +140,30 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
       request.idempotencyKey = batchKey(chunk.map(\.event), register: register) {
         [$0.customer, $0.feature, $0.amount, $0.occurredAt, $0.idempotencyKey]
       }
-      for customer in Set(chunk.map(\.event.customer)) {
-        await core.state.bump(customer, at: Hooks.current.now())
+      if core.cache != nil {
+        for customer in Set(chunk.map(\.event.customer)) {
+          await core.state.bump(customer, at: Hooks.current.now())
+        }
       }
       do {
         let answer: Answer = try await core.call(request)
-        for result in answer.results where chunk.indices.contains(result.index) {
+        var answered = Set<Int>()
+        for result in answer.results
+        where chunk.indices.contains(result.index) && answered.insert(result.index).inserted {
           let sent = chunk[result.index]
           results.append(
             UsageEventResult(
               index: sent.index, outcome: result.outcome, id: result.id, late: result.late,
               error: result.error, idempotencyKey: sent.event.idempotencyKey,
               replayed: answer.replayed))
+        }
+        let unanswered = UsageEventError(
+          code: .invalidResponse, message: "Entitler sent no result for this event.")
+        results += chunk.indices.filter { !answered.contains($0) }.map { position in
+          UsageEventResult(
+            index: chunk[position].index, outcome: .error, id: nil, late: false,
+            error: unanswered, idempotencyKey: chunk[position].event.idempotencyKey,
+            replayed: false)
         }
       } catch let error as EntitlerError {
         let failure: UsageEventError =

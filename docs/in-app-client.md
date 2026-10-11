@@ -44,6 +44,10 @@ let issued = try await server.customer(userID).token(
   scopes: [.entitlementsRead, .usageWrite], ttlSeconds: 3_600)
 ```
 
+`userID` is the signed-in person's id from your server's authenticated session, never one the app
+sends in a header or body: a token is a key to that customer's entitlements, so mint it only for
+the person the request has proved to be.
+
 Without `scopes` a token holds `entitlements:read` only. Ask for `usageWrite` only when the app
 records usage itself, and for `billingSelf` only for people who may buy for the customer (a
 workspace's owners, not every member): it lets the app call `subscribe`, `cancel`,

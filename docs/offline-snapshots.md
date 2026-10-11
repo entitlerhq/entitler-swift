@@ -22,6 +22,34 @@ with code `snapshot_invalid` or `snapshot_expired`.
 
 Meters in a snapshot are frozen when it is signed: `used` and `remaining` do not move offline.
 
+## Where the expectation comes from
+
+A wrong expectation shows only offline, so take each part from the app, never from the snapshot:
+
+- `customer` is the signed-in person's external id from the app's own session. For a customer
+  an identity token names, that is `<provider id>:<subject>`: the sign-in provider's Entitler id
+  from the app's configuration, a colon, and the subject of the person's identity token.
+- `environment` is the environment id the app's build ships, beside its snapshot keys.
+
+## Checking live, then offline
+
+Ask Entitler while it answers, and fall back to the stored snapshot only when it is unreachable:
+
+```swift
+func canExportPDF() async -> Bool {
+  do {
+    return try await client.me.check(Features.exportPDF).entitled
+  } catch let error as EntitlerError where error.isUnreachable {
+    let expected = SnapshotExpectation(
+      keys: bundledKeys, customer: customerID, environment: environmentID)
+    let snapshot = try? verifySnapshot(storedSnapshot, expecting: expected)
+    return snapshot?.entitlements.has(Features.exportPDF) ?? false
+  } catch {
+    return false
+  }
+}
+```
+
 ## Key pinning
 
 The keys decide which snapshots an app trusts. Ship them with the app, written at build time by

@@ -45,7 +45,7 @@ preview, a test target, a build script that imports your module), create it on f
 than at start-up, so a missing key fails only the code that needs it:
 
 ```swift
-enum Entitler {
+enum EntitlerAccess {
   static let server = Result { try EntitlerServer(key: ProcessInfo.processInfo.environment["ENTITLER_KEY"] ?? "") }
 }
 ```

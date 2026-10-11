@@ -34,6 +34,10 @@ In Vapor, store the service in `app.storage` or an `Application` extension and c
 Add a route that answers `token(for:)` for the signed-in user, so your apps' token providers can
 fetch customer tokens.
 
+Take `userID` from the request's authenticated session (the user your authentication middleware
+verified), never from a header, query or body the app sends: anyone can put another person's id
+there and read their entitlements or a token for them.
+
 Register customers at sign-up and sign-in so Entitler's copy stays current:
 
 ```swift

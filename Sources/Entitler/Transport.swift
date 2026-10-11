@@ -96,12 +96,14 @@ actor ClientState {
   private var probing = false
   private(set) var signedInID: String?
 
+  var trackedCustomers: Int { generations.count }
+
   func bump(_ customer: String, at now: Date) {
     counter += 1
     generations[customer] = (counter, now)
-    if generations.count > 10_000 {
-      generations = generations.filter { now.timeIntervalSince($0.value.at) < 86_400 }
-    }
+    guard generations.count > 10_000 else { return }
+    let newest = generations.sorted { $0.value.generation > $1.value.generation }.prefix(5_000)
+    generations = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
   }
 
   func generation(of customer: String?) -> (generation: UInt64, at: Date?) {
@@ -257,7 +259,7 @@ final class Core: Sendable, CustomReflectable {
           status: response.status, code: .invalidResponse,
           message: "Entitler sent an answer this SDK cannot read.", requestID: response.requestID,
           retryAfter: nil, idempotencyKey: response.idempotencyKey, payment: nil,
-          underlyingError: error))
+          underlyingError: withoutBody(error)))
     }
   }
 
@@ -396,7 +398,7 @@ final class Core: Sendable, CustomReflectable {
     -> Response
   {
     if request.method != "GET", request.changesAnswers, let customer = request.customer {
-      await state.bump(customer, at: Hooks.current.now())
+      if cache != nil { await state.bump(customer, at: Hooks.current.now()) }
     }
     var token = token
     if token == nil, request.authenticated { token = try await currentToken() }
@@ -653,3 +655,22 @@ let userAgent: String = {
   #endif
   return "entitler-swift/\(entitlerSDKVersion) swift/\(swift)"
 }()
+
+func withoutBody(_ error: any Error) -> DecodingError {
+  func context(_ original: DecodingError.Context, _ text: String) -> DecodingError.Context {
+    DecodingError.Context(codingPath: original.codingPath, debugDescription: text)
+  }
+  switch error as? DecodingError {
+  case .typeMismatch(let type, let original):
+    return .typeMismatch(type, context(original, "Expected a value of type \(type)."))
+  case .valueNotFound(let type, let original):
+    return .valueNotFound(type, context(original, "Expected a value of type \(type), not null."))
+  case .keyNotFound(let key, let original):
+    return .keyNotFound(key, context(original, "A required field is missing."))
+  case .dataCorrupted(let original):
+    return .dataCorrupted(context(original, "This value cannot be read."))
+  default:
+    return .dataCorrupted(
+      DecodingError.Context(codingPath: [], debugDescription: "The answer cannot be read."))
+  }
+}

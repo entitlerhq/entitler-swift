@@ -35,6 +35,37 @@ func feature(
     #"{"id":"\#(key)","key":"\#(key)","name":"\#(name ?? key)","type":"\#(type)","description":"\#(description)","unit":"\#(unit)","resetEvery":null,"archived":\#(archived),"includes":[\#(includes)]}"#
 }
 
+@Suite struct GeneratorEscapingTests {
+  @Test func catalogueTextCannotBreakOutOfCommentsOrStrings() throws {
+    let hostile = "x\nlet injected = 1\r\u{2028}let injected2 = 2\u{2029}let injected3 = 3"
+    let object: [String: Any] = [
+      "environment": ["id": "e", "name": "dev" + hostile, "kind": "test"],
+      "track": ["id": "t", "name": "Beta" + hostile], "release": 2, "change": "c" + hostile,
+      "features": [
+        [
+          "id": "f", "key": "odd\"key\\\n", "name": "Name" + hostile,
+          "type": "boolean", "description": "First" + hostile, "unit": "", "resetEvery": NSNull(),
+          "archived": false, "includes": [String](),
+        ],
+        [
+          "id": "g", "key": "meter", "name": "Meter", "type": "metered", "description": "",
+          "unit": "credits" + hostile, "resetEvery": NSNull(), "archived": false,
+          "includes": [String](),
+        ],
+      ],
+    ]
+    let list = try JSON.decoder().decode(
+      FeatureList.self, from: JSONSerialization.data(withJSONObject: object))
+    let source = renderFeatures(list)
+    let lines = source.split(omittingEmptySubsequences: false) { $0.isNewline }
+    #expect(!lines.contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("let injected") })
+    #expect(!source.unicodeScalars.contains { $0 == "\r" || $0 == "\u{2028}" || $0 == "\u{2029}" })
+    #expect(source.contains(#"static let oddKey = Feature<OnOff>("odd\"key\\\n")"#))
+    #expect(featureConstantName(for: "9_lives") == "feature9Lives")
+    #expect(featureConstantName(for: "\u{2028}") == "feature")
+  }
+}
+
 let sampleCatalogue = [
   feature(
     "team_essentials", "group", name: "Team essentials",

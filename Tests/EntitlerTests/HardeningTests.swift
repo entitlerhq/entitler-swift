@@ -571,6 +571,105 @@ import Testing
   }
 }
 
+@Suite struct BookkeepingTests {
+  @Test func writesKeepNoPerCustomerStateWithTheCacheOff() async throws {
+    let api = FakeAPI { _ in .json(Fixture.planChange()) }
+    let server = try api.server(cache: nil)
+    try await api.run {
+      for index in 0..<50 { _ = try await server.customer("u\(index)").cancel() }
+    }
+    #expect(await server.core.state.trackedCustomers == 0)
+  }
+
+  @Test func perCustomerStateStaysBounded() async throws {
+    let state = ClientState()
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    for index in 0..<25_000 { await state.bump("u\(index)", at: now) }
+    #expect(await state.trackedCustomers <= 10_000)
+    #expect(await state.generation(of: "u24999").generation > 0)
+  }
+}
+
+@Suite struct EmptyAnswerTests {
+  func expectInvalid(_ call: @escaping @Sendable () async throws -> Void) async {
+    do {
+      try await call()
+      Issue.record("Expected invalid_response")
+    } catch EntitlerError.api(let error) {
+      #expect(error.code == .invalidResponse)
+    } catch {
+      Issue.record("Unexpected \(error)")
+    }
+  }
+
+  @Test func anEmptyObjectIsNeverAnAnswer() async throws {
+    let api = FakeAPI { _ in .json("{}") }
+    let server = try api.server(cache: nil)
+    let customer = try server.customer("u")
+    let client = try EntitlerClient(key: "ent_pk_test", cache: nil, options: api.options())
+    try await api.run {
+      await expectInvalid { _ = try await server.features() }
+      await expectInvalid { _ = try await server.scopes() }
+      await expectInvalid { _ = try await server.snapshotKeys() }
+      await expectInvalid { _ = try await client.pricing() }
+      await expectInvalid { _ = try await customer.pricing() }
+      await expectInvalid { _ = try await customer.usage() }
+      await expectInvalid { _ = try await customer.details() }
+      await expectInvalid { _ = try await customer.snapshot() }
+      await expectInvalid { _ = try await customer.billing() }
+      await expectInvalid {
+        var pages = server.customers.list().pages.makeAsyncIterator()
+        _ = try await pages.next()
+      }
+      let batch = try await server.recordUsageBatch([
+        UsageBatchEvent(
+          customer: "u", feature: Feature<Metered>("f"), amount: 1, idempotencyKey: "a")
+      ])
+      #expect(batch.results.map(\.error?.code) == [.invalidResponse])
+    }
+  }
+
+  @Test func anUnreadableAnswerNeverQuotesItsBody() async throws {
+    let bodies = [
+      #"{"customer": secret_token_123}"#,
+      Fixture.check().replacingOccurrences(
+        of: #""release":2"#, with: #""release":98765432109876543210123"#),
+      Fixture.check().replacingOccurrences(
+        of: #""customer":"user_1""#, with: #""customer":{"secret_token_123":1}"#),
+    ]
+    for body in bodies {
+      let api = FakeAPI { _ in .json(body) }
+      do {
+        _ = try await api.run { try await api.server(cache: nil).customer("u").check("sso") }
+        Issue.record("Expected invalid_response")
+      } catch EntitlerError.api(let error) {
+        #expect(error.code == .invalidResponse)
+        let cause = String(reflecting: error.underlyingError as Any)
+        #expect(error.underlyingError is DecodingError)
+        #expect(!cause.contains("secret_token_123"))
+        #expect(!cause.contains("98765432109876543210123"))
+      }
+    }
+  }
+
+  @Test func aBatchAnswerMissingResultsMarksThoseEventsAsErrors() async throws {
+    let api = FakeAPI { _ in
+      .json(
+        #"{"results":[{"index":1,"outcome":"recorded","id":"u_2","late":false,"error":null},{"index":7,"outcome":"recorded","id":"u_8","late":false,"error":null}]}"#
+      )
+    }
+    let events = (0..<3).map {
+      UsageBatchEvent(
+        customer: "u", feature: Feature<Metered>("f"), amount: 1, idempotencyKey: "k\($0)")
+    }
+    let batch = try await api.run { try await api.server().recordUsageBatch(events) }
+    #expect(batch.results.map(\.index) == [0, 1, 2])
+    #expect(batch.results.map(\.outcome) == [.error, .recorded, .error])
+    #expect(batch.results.map(\.error?.code) == [.invalidResponse, nil, .invalidResponse])
+    #expect(batch.errors == 2)
+  }
+}
+
 @Suite struct PrecisionTests {
   @Test func idsAreSentAsGivenAndCredentialsTrimmed() async throws {
     let api = FakeAPI { _ in .json(Fixture.check()) }

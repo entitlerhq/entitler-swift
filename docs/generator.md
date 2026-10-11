@@ -47,9 +47,17 @@ enum ExampleFeatures {
 
   /// Team essentials
   ///
+  /// Everything a team needs, as one unit.
+  ///
   /// Includes collaboration, support_extras.
   static let teamEssentials = Feature<FeatureGroup>(
-    "team_essentials", includes: ["team_seats", "shared_folders"]
+    "team_essentials",
+    includes: [
+      "team_seats",
+      "shared_folders",
+      "priority_support",
+      "support_sla_hours",
+    ]
   )
 }
 ```

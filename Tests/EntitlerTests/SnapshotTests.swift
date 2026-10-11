@@ -336,6 +336,16 @@ extension JSONWebKey {
     #expect(parseInstant("2026-07-01T11:30:00+02:00") == Date(timeIntervalSince1970: 1_782_898_200))
     #expect(parseInstant("2026-07-01T09:30:00.000Z") == Date(timeIntervalSince1970: 1_782_898_200))
     #expect(parseInstant("yesterday") == nil)
+    for impossible in [
+      "2026-02-31T00:00:00Z", "2026-02-29T00:00:00.000Z", "2026-13-01T00:00:00Z",
+      "2026-04-31T00:00:00Z", "2026-07-01T24:00:00Z", "2026-07-01T23:60:00Z",
+      "2026-07-01T23:59:61Z", "2026-07-01T09:30:00+25:00",
+    ] {
+      #expect(parseInstant(impossible) == nil, "\(impossible)")
+    }
+    #expect(parseInstant("2024-02-29T00:00:00Z") != nil)
+    #expect(parseInstant("0400-02-29T00:00:00Z") != nil)
+    #expect(parseInstant("1900-02-29T00:00:00Z") == nil)
     #expect(formatInstant(Date(timeIntervalSince1970: 1_782_898_200)) == "2026-07-01T09:30:00.000Z")
   }
 

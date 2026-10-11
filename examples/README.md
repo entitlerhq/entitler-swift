@@ -14,8 +14,8 @@ in `ENTITLER_KEY`, from this directory:
 - `metered-work`: a `startHold` handle around streamed work that reports as it goes, `withHold`
   around work whose cost is known only afterwards, and an observe-mode report.
   `ENTITLER_KEY=ent_test_… swift run metered-work`
-- `offline`: fetches a snapshot and the keys, then verifies the snapshot offline and checks a
-  feature. `ENTITLER_KEY=ent_test_… swift run offline`
+- `offline`: fetches a snapshot and the keys, verifies the snapshot offline and checks a feature,
+  then checks live and falls back to the snapshot only when Entitler is unreachable. `ENTITLER_KEY=ent_test_… swift run offline`
 - `billing`: a billing page from `plans()`, `subscribe` handling every next step, the return page
   with `syncBilling()`, `cancel` and `undoPendingChange`, the billing portal handling `404 not_found` and `409 stale`,
   and the company's `setPlan` with `billing: .end` and a grant whose id it keeps.

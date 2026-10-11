@@ -121,6 +121,7 @@ enum JSON {
 }
 
 func parseInstant(_ text: String) -> Date? {
+  guard hasRealFields(text) else { return nil }
   let year = text.prefix(5)
   guard year.count == 5, year.last == "-", year.dropLast().allSatisfy(\.isASCIIDigit),
     year.dropLast() != "0000"
@@ -131,6 +132,40 @@ func parseInstant(_ text: String) -> Date? {
     (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(shifted))
     ?? (try? Date.ISO8601FormatStyle().parse(shifted))
   return date?.addingTimeInterval(-Double(cycles) * 146_097 * 86_400)
+}
+
+private func hasRealFields(_ text: String) -> Bool {
+  let scalars = Array(text.utf8)
+  func number(_ start: Int, _ length: Int) -> Int? {
+    guard start + length <= scalars.count else { return nil }
+    var value = 0
+    for byte in scalars[start..<start + length] {
+      guard (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte) else { return nil }
+      value = value * 10 + Int(byte - UInt8(ascii: "0"))
+    }
+    return value
+  }
+  guard let year = number(0, 4), let month = number(5, 2), let day = number(8, 2),
+    let hour = number(11, 2), let minute = number(14, 2), let second = number(17, 2),
+    (1...12).contains(month), hour <= 23, minute <= 59, second <= 59
+  else { return false }
+  let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+  let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+  guard (1...days).contains(day) else { return false }
+  var index = 19
+  if index < scalars.count, scalars[index] == UInt8(ascii: ".") {
+    index += 1
+    while index < scalars.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(scalars[index]) {
+      index += 1
+    }
+  }
+  guard index < scalars.count, scalars[index] != UInt8(ascii: "Z"),
+    scalars[index] != UInt8(ascii: "z")
+  else { return true }
+  guard let offsetHours = number(index + 1, 2), let offsetMinutes = number(index + 4, 2) else {
+    return false
+  }
+  return offsetHours <= 23 && offsetMinutes <= 59
 }
 
 func formatInstant(_ date: Date) -> String {
