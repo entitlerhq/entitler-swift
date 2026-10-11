@@ -127,6 +127,31 @@ import Testing
     #expect(try await customer.check(Self.credits).used == 15)
   }
 
+  @Test func replaysChangeNoMeterAndCancelledReportsReplayAsCancelled() async throws {
+    let fake = FakeCustomer(["ai_credits": .metered(value: 100, used: 0)])
+    let customer = fake.customer
+    let first = try await customer.recordUsage(of: Self.credits, amount: 5, idempotencyKey: "r")
+    #expect(first.meterChange == 5)
+    let replay = try await customer.recordUsage(of: Self.credits, amount: 5, idempotencyKey: "r")
+    #expect(replay.outcome == .duplicate)
+    #expect(replay.meterChange == 0)
+    _ = try await customer.cancelUsage(
+      id: try #require(first.id), reason: "Refund", actor: "support")
+    #expect(try await customer.check(Self.credits).used == 0)
+    let afterCancel = try await customer.recordUsage(
+      of: Self.credits, amount: 5, idempotencyKey: "r")
+    #expect(afterCancel.outcome == .cancelled)
+    #expect(afterCancel.meterChange == 0)
+    #expect(try await customer.check(Self.credits).used == 0)
+    let entry = try #require(try await customer.usage().log.items.first)
+    #expect(entry.cancelledAt != nil)
+    #expect(entry.actor == "support")
+    #expect(entry.reason == "Refund")
+    let hold = try await customer.startHold(of: Self.credits, amount: 4, idempotencyKey: "h")
+    try await hold.release()
+    #expect(try await customer.usage().log.items.count == 1)
+  }
+
   @Test func settlingMoreThanTheHoldIsAnInvalidBody() async throws {
     let fake = FakeCustomer(["ai_credits": .metered(value: 100, used: 0)])
     let customer = fake.customer

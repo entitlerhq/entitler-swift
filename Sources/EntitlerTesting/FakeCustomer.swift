@@ -152,12 +152,15 @@ struct State {
     let amount: Int64
     let setTo: Int64?
     var cancelled = false
+    var actor: String?
+    var reason: String?
 
     var object: [String: Any] {
       [
         "id": id, "feature": feature, "amount": amount, "kind": setTo == nil ? "use" : "adjust",
         "setTo": FakeAnswers.orNull(setTo), "source": "api", "by": "Test key",
-        "actor": NSNull(), "reason": NSNull(), "at": FakeAnswers.now,
+        "actor": FakeAnswers.orNull(actor), "reason": FakeAnswers.orNull(reason),
+        "at": FakeAnswers.now,
         "cancelledAt": cancelled ? FakeAnswers.now : NSNull(),
       ]
     }
@@ -235,12 +238,17 @@ struct State {
       var object = (try? JSONSerialization.jsonObject(with: kept)) as? [String: Any]
     else { return kept }
     let hold = (object["holdId"] as? String).flatMap { holds[$0] }
+    let cancelled = (object["id"] as? String).map { id in
+      log.contains { $0.id == id && $0.cancelled }
+    }
     object["outcome"] =
-      switch (name, hold?.settled, hold?.released) {
-      case ("holdUsage", .some, _): UsageOutcome.settled.rawValue
-      case ("holdUsage", _, true): UsageOutcome.released.rawValue
+      switch (name, hold?.settled, hold?.released, cancelled) {
+      case ("holdUsage", .some, _, _): UsageOutcome.settled.rawValue
+      case ("holdUsage", _, true, _): UsageOutcome.released.rawValue
+      case ("recordUsage", _, _, true): UsageOutcome.cancelled.rawValue
       default: UsageOutcome.duplicate.rawValue
       }
+    object["meterChange"] = 0
     return FakeAnswers.json(object)
   }
 
@@ -365,7 +373,9 @@ struct State {
       return adjust(
         segments[1], by: (body["by"] as? NSNumber)?.int64Value,
         to: (body["to"] as? NSNumber)?.int64Value)
-    case "cancelUsage": return cancelReport(segments[1])
+    case "cancelUsage":
+      return cancelReport(
+        segments[1], actor: body["actor"] as? String, reason: body["reason"] as? String)
     case "subscribe": return (200, FakeAnswers.subscribeDone(plan: body["plan"] as? String), true)
     case "setPlan": return (200, FakeAnswers.planChange(plan: body["plan"] as? String), true)
     case "setAddOn":
@@ -546,14 +556,18 @@ struct State {
     )
   }
 
-  mutating func cancelReport(_ id: String) -> (Int, Data, Bool) {
+  mutating func cancelReport(_ id: String, actor: String?, reason: String?) -> (Int, Data, Bool) {
     guard let report = reports.removeValue(forKey: id) else {
       return (
         404, FakeAnswers.error(code: .notFound, message: "No usage report has the id \(id)."),
         false
       )
     }
-    if let index = log.firstIndex(where: { $0.id == id }) { log[index].cancelled = true }
+    if let index = log.firstIndex(where: { $0.id == id }) {
+      log[index].cancelled = true
+      log[index].actor = actor
+      log[index].reason = reason
+    }
     if var meter = meters[report.feature] {
       meter.used = max(0, meter.used - report.amount)
       meters[report.feature] = meter
