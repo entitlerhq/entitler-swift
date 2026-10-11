@@ -54,6 +54,8 @@ do {
     print("Billing portal: \(portal.url)")
   } catch EntitlerError.api(let error) where error.code == .notFound {
     print("No provider has billed this customer yet: \(error.message)")
+  } catch EntitlerError.api(let error) where error.code == .stale {
+    print("This environment has no payment provider connected: \(error.message)")
   }
 
   let deal = try await customer.setPlan(

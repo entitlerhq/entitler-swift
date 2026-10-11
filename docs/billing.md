@@ -120,11 +120,15 @@ do {
   print("Open", portal.url)
 } catch EntitlerError.api(let error) where error.code == .notFound {
   print("No provider has billed this customer yet")
+} catch EntitlerError.api(let error) where error.code == .stale {
+  print("This environment has no payment provider connected")
 }
 ```
 
-The portal shows payment details and invoices; it changes no plan. A customer the provider has
-never billed answers `404 not_found`.
+The portal shows payment details and invoices; it changes no plan. It answers the provider's page,
+or `404 not_found` for a customer the provider has never billed, or `409 stale` when the
+environment has no payment provider connected, as a test environment without Stripe has: there is
+no page to open, so hide the link.
 
 The company's own changes (deals, support, verified store purchases) are on the server's customer:
 see [company decisions](company-decisions.md).
