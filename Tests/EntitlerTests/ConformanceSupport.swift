@@ -149,8 +149,9 @@ func headers(_ object: Any?) -> [String: String] {
 
 func isUUIDv4(_ text: String?) -> Bool {
   guard let text else { return false }
-  return text.lowercased().wholeMatch(
-    of: /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/) != nil
+  let characters = Array(text.lowercased())
+  return characters.count == 36 && UUID(uuidString: text) != nil && characters[14] == "4"
+    && "89ab".contains(characters[19])
 }
 
 enum Shape {
