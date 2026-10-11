@@ -514,7 +514,8 @@ extension Customer {
     if let addOn {
       return (["subscription", "add-ons", try require(addOn, Messages.plan)] + suffix, [])
     }
-    return (["subscription"] + suffix, product.map { [("product", $0)] } ?? [])
+    guard let product else { return (["subscription"] + suffix, []) }
+    return (["subscription"] + suffix, [("product", try require(product, Messages.product))])
   }
 }
 

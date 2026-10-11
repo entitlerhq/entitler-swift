@@ -30,13 +30,13 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
     guard !key.hasPrefix("ent_pk_") else {
       throw ArgumentError(message: Messages.publishableOnServer)
     }
-    core = Core(options: options, cache: cache, credential: .server(key: key), visitor: nil)
+    core = try Core(options: options, cache: cache, credential: .server(key: key), visitor: nil)
   }
 
   package init(
     key: String, cache: (any CacheStore)?, options: EntitlerOptions, exchange: @escaping Exchange
-  ) {
-    core = Core(
+  ) throws {
+    core = try Core(
       options: options, cache: cache, credential: .server(key: key), visitor: nil,
       exchange: exchange)
   }
@@ -404,7 +404,7 @@ public final class EntitlerClient<Credential: ClientCredential>: Sendable, Custo
     credential: CoreCredential, visitor: String?, cache: MemoryCacheStore?,
     options: EntitlerOptions
   ) throws {
-    core = Core(
+    core = try Core(
       options: options, cache: cache, credential: credential,
       visitor: try validVisitor(visitor) ?? storedVisitor())
   }

@@ -526,6 +526,51 @@ import Testing
   }
 }
 
+@Suite struct RequiredNullableTests {
+  static let held =
+    #"{"plan":{"id":"p","key":"free","name":"Free","kind":"plan"},"product":null,"version":1,"byDefault":true,"period":null,"renewsAt":null,"pending":null,"billedBy":null}"#
+
+  func decodes<T: Decodable>(_ type: T.Type, _ json: String) -> Bool {
+    (try? JSON.decoder().decode(type, from: Data(json.utf8))) != nil
+  }
+
+  func without(_ key: String, in json: String) -> String {
+    var object = try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    object[key] = nil
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+  }
+
+  @Test func requiredNullableFieldsMustBePresent() {
+    #expect(decodes(Check.self, Fixture.check()))
+    for key in ["release", "change", "experiment"] {
+      #expect(!decodes(Check.self, without(key, in: Fixture.check())), "Check without \(key)")
+    }
+    #expect(decodes(PlanChange.self, Fixture.planChange()))
+    #expect(!decodes(PlanChange.self, without("until", in: Fixture.planChange())))
+    #expect(decodes(HeldPlan.self, Self.held))
+    for key in ["period", "pending", "billedBy"] {
+      #expect(!decodes(HeldPlan.self, without(key, in: Self.held)), "HeldPlan without \(key)")
+    }
+  }
+
+  @Test func encodedAnswersDecodeAgain() throws {
+    let check = try JSON.decoder().decode(Check.self, from: Data(Fixture.check().utf8))
+    #expect(try JSON.decoder().decode(Check.self, from: JSON.encoder().encode(check)) == check)
+    let held = try JSON.decoder().decode(HeldPlan.self, from: Data(Self.held.utf8))
+    #expect(try JSON.decoder().decode(HeldPlan.self, from: JSON.encoder().encode(held)) == held)
+  }
+
+  @Test func anAnswerMissingOneIsAnInvalidResponse() async throws {
+    let api = FakeAPI { _ in .json(self.without("release", in: Fixture.check())) }
+    do {
+      _ = try await api.run { try await api.server().customer("u").check("sso") }
+      Issue.record("Expected invalid_response")
+    } catch EntitlerError.api(let error) {
+      #expect(error.code == .invalidResponse)
+    }
+  }
+}
+
 @Suite struct PrecisionTests {
   @Test func idsAreSentAsGivenAndCredentialsTrimmed() async throws {
     let api = FakeAPI { _ in .json(Fixture.check()) }

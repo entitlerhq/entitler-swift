@@ -53,8 +53,43 @@ import Testing
     #expect(throws: ArgumentError(message: Messages.visitor)) {
       try EntitlerClient(token: "t", visitor: "short")
     }
+    for visitor in [
+      "abcdefghijklmnop\n", "abcdefghijklmnop\r\n", "\nabcdefghijklmnop", "abcdefghijklmnoé",
+    ] {
+      #expect(throws: ArgumentError(message: Messages.visitor)) {
+        try EntitlerClient(token: "t", visitor: visitor)
+      }
+      #expect(visitor.range(of: visitorIDPattern, options: .regularExpression) == nil)
+    }
     let client = try EntitlerClient(tokenProvider: { "x" }, visitor: "abcdefghijklmnop")
     #expect(client.visitor == "abcdefghijklmnop")
+  }
+
+  @Test(arguments: [0, -1, TimeInterval.infinity, TimeInterval.nan])
+  func timeoutsMustBeFiniteAndPositive(timeout: TimeInterval) async throws {
+    #expect(throws: ArgumentError(message: Messages.timeout)) {
+      try EntitlerServer(key: "sk_test", options: EntitlerOptions(timeout: timeout))
+    }
+    #expect(throws: ArgumentError(message: Messages.timeout)) {
+      try EntitlerClient(token: "t", options: EntitlerOptions(timeout: timeout))
+    }
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let customer = try api.server().customer("u")
+    await #expect(throws: ArgumentError(message: Messages.timeout)) {
+      try await api.run { try await customer.check("sso", timeout: timeout) }
+    }
+    #expect(api.count == 0)
+  }
+
+  @Test func overlongWaitsSleepWithoutTrapping() async throws {
+    for wait in [TimeInterval.infinity, 1.9e10, 1e300] {
+      let sleeping = Task { try await Hooks().sleep(wait) }
+      sleeping.cancel()
+      await #expect(throws: CancellationError.self) { try await sleeping.value }
+      let deadline = Task { try await Hooks().deadline(wait) }
+      deadline.cancel()
+      await #expect(throws: CancellationError.self) { try await deadline.value }
+    }
   }
 
   @Test func stringFormsNeverShowCredentials() throws {
@@ -77,6 +112,18 @@ import Testing
       #expect(!dumped.contains("secret"))
       #expect(!String(reflecting: value).contains("secret"))
     }
+    let issued = try JSON.decoder().decode(
+      IssuedCustomerToken.self,
+      from: Data(
+        #"{"token":"tok_secret","customer":"u","scopes":["entitlements:read"],"expiresAt":"2026-10-11T10:00:00Z"}"#
+          .utf8))
+    var dumpedToken = ""
+    dump(issued, to: &dumpedToken)
+    #expect(!dumpedToken.contains("secret"))
+    #expect(!String(describing: issued).contains("secret"))
+    #expect(!String(reflecting: issued).contains("secret"))
+    #expect(!"\(issued)".contains("secret"))
+    #expect(issued.token == "tok_secret")
     #expect(try server.customer("u").description == "ServerCustomer(u)")
     #expect(client.me.description == "SignedInCustomer(me)")
   }
@@ -227,6 +274,21 @@ import Testing
 }
 
 @Suite struct ErrorTests {
+  @Test func everyNamedCodeIsKnown() throws {
+    let source = try String(
+      contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../../Sources/Entitler/Errors.swift"), encoding: .utf8)
+    let named = source.components(separatedBy: "ErrorCode(rawValue: \"").dropFirst()
+      .map { String($0.prefix { $0 != "\"" }) }
+    #expect(named.count > 60)
+    #expect(Set(ErrorCode.all.map(\.rawValue)) == Set(named))
+    #expect(ErrorCode.all.count == named.count)
+    #expect(named.allSatisfy { ErrorCode(rawValue: $0).isKnown })
+    #expect(ErrorCode.internal.isKnown)
+    #expect(ErrorCode.snapshotKeyUnavailable.rawValue == "snapshot_key_unavailable")
+    #expect(!ErrorCode(rawValue: "brand_new").isKnown)
+  }
+
   @Test func apiErrorsCarryEveryField() async throws {
     let api = FakeAPI { _ in
       .json(

@@ -110,6 +110,12 @@ import Testing
     await #expect(throws: ArgumentError(message: "Name the plan by its id or its key.")) {
       try await customer.undoPendingChange(addOn: "")
     }
+    await #expect(throws: ArgumentError(message: "Name the product by its key.")) {
+      try await customer.cancel(product: " ")
+    }
+    await #expect(throws: ArgumentError(message: "Name the product by its key.")) {
+      try await customer.undoPendingChange(product: "")
+    }
     #expect(api.count == count)
   }
 

@@ -176,12 +176,12 @@ func verifiedSnapshot(_ token: String, expecting expected: SnapshotExpectation) 
     fields.keys.contains("release"), fields.keys.contains("change"),
     claims.entitlements.allSatisfy(\.hasValidMeters)
   else { throw malformed }
+  let instants = -62_135_596_800...253_402_300_799 as ClosedRange<Int64>
+  guard instants.contains(claims.iat), instants.contains(claims.exp) else { throw malformed }
   guard claims.iss == expected.issuer else {
     throw fail(.invalid, "This snapshot was not issued by \(expected.issuer).")
   }
   let now = expected.now ?? Hooks.current.now()
-  let instants = -62_135_596_800...253_402_300_799 as ClosedRange<Int64>
-  guard instants.contains(claims.iat), instants.contains(claims.exp) else { throw malformed }
   let issuedAt = Date(timeIntervalSince1970: TimeInterval(claims.iat))
   let expiresAt = Date(timeIntervalSince1970: TimeInterval(claims.exp))
   guard issuedAt <= now.addingTimeInterval(TimeInterval(expected.clockSkewSeconds)) else {

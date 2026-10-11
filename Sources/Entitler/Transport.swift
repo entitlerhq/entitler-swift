@@ -12,10 +12,10 @@ import Foundation
 struct Hooks: Sendable {
   var now: @Sendable () -> Date = { Date() }
   var sleep: @Sendable (TimeInterval) async throws -> Void = { seconds in
-    try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+    try await Task.sleep(nanoseconds: nanoseconds(seconds))
   }
   var deadline: @Sendable (TimeInterval) async throws -> Void = { seconds in
-    try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+    try await Task.sleep(nanoseconds: nanoseconds(seconds))
   }
   var random: @Sendable (ClosedRange<Double>) -> Double = { Double.random(in: $0) }
 
@@ -23,6 +23,15 @@ struct Hooks: Sendable {
 }
 
 typealias CoreCredential = Credential
+
+func nanoseconds(_ seconds: TimeInterval) -> UInt64 {
+  UInt64(min(max(0, seconds), 1_000_000_000) * 1_000_000_000)
+}
+
+func validTimeout(_ timeout: TimeInterval) throws -> TimeInterval {
+  guard timeout.isFinite, timeout > 0 else { throw ArgumentError(message: Messages.timeout) }
+  return timeout
+}
 
 enum Credential: Sendable {
   case server(key: String)
@@ -156,7 +165,8 @@ final class Core: Sendable, CustomReflectable {
   init(
     options: EntitlerOptions, cache: (any CacheStore)?, credential: Credential, visitor: String?,
     exchange: Exchange? = nil
-  ) {
+  ) throws {
+    _ = try validTimeout(options.timeout)
     self.options = options
     self.cache = cache
     self.credential = credential
@@ -393,7 +403,7 @@ final class Core: Sendable, CustomReflectable {
     let hooks = Hooks.current
     let idempotencyKey =
       request.method == "GET" ? nil : request.idempotencyKey ?? UUID().uuidString.lowercased()
-    let timeout = request.timeout ?? options.timeout
+    let timeout = try validTimeout(request.timeout ?? options.timeout)
     var retries = 0
     var refreshed = false
     while true {

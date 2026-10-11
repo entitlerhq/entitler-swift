@@ -186,6 +186,38 @@ extension JSONWebKey {
         == "This snapshot was not issued by https://api.entitler.dev/customers.")
   }
 
+  @Test func checksTheInstantRangeBeforeTheIssuer() {
+    let signer = Signer()
+    let token = signer.sign(
+      claims: Self.claims {
+        $0["iss"] = "https://evil.test"
+        $0["iat"] = 300_000_000_000
+      })
+    #expect(
+      failure(token, expectation(signer))?.message
+        == "That is not an entitlements snapshot. Pass the token snapshot() returned.")
+  }
+
+  @Test func aMissingOrNonStringKidMatchesNoKey() throws {
+    let signer = Signer()
+    #expect(throws: DecodingError.self) {
+      try JSONDecoder().decode(
+        JSONWebKey.self,
+        from: Data(
+          #"{"kty":"EC","crv":"P-256","x":"\#(signer.jwk.x)","y":"\#(signer.jwk.y)","alg":"ES256","use":"sig"}"#
+            .utf8))
+    }
+    for header in [
+      ["typ": "entitlements+jwt", "alg": "ES256"] as [String: Any],
+      ["typ": "entitlements+jwt", "alg": "ES256", "kid": 7],
+      ["typ": "entitlements+jwt", "alg": "ES256", "kid": NSNull()],
+    ] {
+      #expect(
+        failure(signer.sign(header: header, claims: Self.claims()), expectation(signer))?.message
+          == "None of the keys passed signed this snapshot. Fetch them again with snapshotKeys().")
+    }
+  }
+
   @Test func refusesSnapshotsSignedInTheFutureBeyondTheSkew() {
     let signer = Signer()
     let token = signer.sign(claims: Self.claims { $0["iat"] = 1_800_000_061 })

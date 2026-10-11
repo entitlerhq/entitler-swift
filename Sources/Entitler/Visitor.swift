@@ -1,7 +1,7 @@
 import Foundation
 
 /// The pattern a visitor id matches: 16 to 64 letters, numbers, hyphens or underscores.
-public let visitorIDPattern = "^[A-Za-z0-9_-]{16,64}$"
+public let visitorIDPattern = #"\A[A-Za-z0-9_-]{16,64}\z"#
 
 /// A new visitor id: 24 random bytes, base64url without padding (32 characters).
 ///
@@ -17,10 +17,19 @@ func randomVisitorID() -> String {
 
 func validVisitor(_ visitor: String?) throws -> String? {
   guard let visitor else { return nil }
-  guard visitor.range(of: visitorIDPattern, options: .regularExpression) != nil else {
+  guard (16...64).contains(visitor.utf8.count), visitor.utf8.allSatisfy(isVisitorByte) else {
     throw ArgumentError(message: Messages.visitor)
   }
   return visitor
+}
+
+private func isVisitorByte(_ byte: UInt8) -> Bool {
+  switch byte {
+  case UInt8(ascii: "A")...UInt8(ascii: "Z"), UInt8(ascii: "a")...UInt8(ascii: "z"),
+    UInt8(ascii: "0")...UInt8(ascii: "9"), UInt8(ascii: "-"), UInt8(ascii: "_"):
+    true
+  default: false
+  }
 }
 
 func validIdempotencyKey(

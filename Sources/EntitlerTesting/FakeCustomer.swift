@@ -99,7 +99,7 @@ public final class FakeCustomer: Sendable {
         id: id, values: values, plans: plans ?? FakeAnswers.plans(customer: id),
         pricing: pricing ?? FakeAnswers.pricing(customer: id)))
     self.state = state
-    let server = EntitlerServer(
+    let server = try! EntitlerServer(
       key: "ent_test_fake", cache: nil,
       options: EntitlerOptions(
         baseURL: URL(string: "https://fake.entitler.invalid")!, maxRetries: 0),

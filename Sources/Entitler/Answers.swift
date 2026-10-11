@@ -306,6 +306,10 @@ public struct HeldPlan: Codable, Hashable, Sendable {
   /// is changed in the store's own management page; one Stripe bills, in
   /// ``Customer/billingPortal(returnURL:timeout:)``.
   public let billedBy: Provider?
+
+  enum CodingKeys: String, CodingKey {
+    case plan, product, version, byDefault, period, renewsAt, pending, billedBy
+  }
 }
 
 /// A change booked for a plan's renewal.
@@ -727,6 +731,11 @@ public struct CustomerUsage: Codable, Hashable, Sendable {
   public let testers: Bool
   /// The experiment the customer is in, if any.
   public let experiment: ExperimentAssignment?
+
+  enum CodingKeys: String, CodingKey {
+    case customer, asOf, metersStartAgainAt, features, log, environment, track, release, change,
+      testers, experiment
+  }
 }
 
 /// What a usage write did: the check after it, plus the outcome.
@@ -922,6 +931,10 @@ public struct Purchase: Codable, Hashable, Sendable {
   public let change: String?
   /// The experiment arm it was bought in.
   public let arm: Arm?
+
+  enum CodingKeys: String, CodingKey {
+    case money, channel, release, change, arm
+  }
 }
 
 /// An add-on a customer holds.
@@ -1307,7 +1320,9 @@ public struct IssuedSnapshot: Codable, Hashable, Sendable {
 }
 
 /// A customer token for an in-app client.
-public struct IssuedCustomerToken: Codable, Hashable, Sendable {
+public struct IssuedCustomerToken: Codable, Hashable, Sendable, CustomStringConvertible,
+  CustomDebugStringConvertible, CustomReflectable
+{
   /// The token. Send it to the customer's app and nowhere else.
   public let token: String
   /// The customer's external id.
@@ -1328,6 +1343,20 @@ public struct IssuedCustomerToken: Codable, Hashable, Sendable {
     customer = try container.decode(String.self, forKey: .customer)
     scopes = Scope.known(try container.decode([String].self, forKey: .scopes))
     expiresAt = try container.decode(Date.self, forKey: .expiresAt)
+  }
+
+  /// The customer, scopes and expiry, never the token.
+  public var description: String {
+    "IssuedCustomerToken(customer: \(customer), scopes: \(scopes.map(\.rawValue)), expiresAt: "
+      + "\(formatInstant(expiresAt)))"
+  }
+
+  /// The same as ``description``: the token is never shown.
+  public var debugDescription: String { description }
+
+  /// A mirror that leaves the token out.
+  public var customMirror: Mirror {
+    Mirror(self, children: ["customer": customer, "scopes": scopes, "expiresAt": expiresAt])
   }
 }
 
@@ -1365,4 +1394,52 @@ extension CustomerUsage: MeterChecked {
 
 extension UsageResult: MeterChecked {
   var hasValidMeters: Bool { remaining.isMeterAmount }
+}
+
+extension Check.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+}
+
+extension MeteredCheck.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+}
+
+extension Entitlements.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+}
+
+extension CustomerPlans.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+}
+
+extension Pricing.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+}
+
+extension FeatureList.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change"]
+}
+
+extension CustomerUsage.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = [
+    "metersStartAgainAt", "release", "change", "experiment",
+  ]
+}
+
+extension UsageResult.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["release", "change", "experiment"]
+}
+
+extension Purchase.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["channel", "release", "change", "arm"]
+}
+
+extension HeldPlan.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = [
+    "product", "version", "period", "pending", "billedBy",
+  ]
+}
+
+extension PlanChange.CodingKeys: RequiredNullableKeys {
+  static let requiredNullable: Set<String> = ["until"]
 }

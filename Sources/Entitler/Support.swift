@@ -217,7 +217,59 @@ enum Messages {
     "A secret key belongs on your server, in EntitlerServer. Use a publishable key (ent_pk_…) in an app."
   static let expectation = "Provide the customer and environment the snapshot must be for."
   static let dots = "Pass an id that is not made only of dots."
+  static let timeout = "Pass timeout as a number of seconds above 0."
   static let amount = "Pass amount as a whole number from 1 to 9007199254740991."
   static let settledAmount = "Pass amount as a whole number from 0 to the held amount."
   static let amountUsed = "Pass the amount used as a whole number of 0 or more."
+}
+
+protocol RequiredNullableKeys: CodingKey {
+  static var requiredNullable: Set<String> { get }
+}
+
+extension KeyedDecodingContainer where K: RequiredNullableKeys {
+  func decodeIfPresent(_ type: Int64.Type, forKey key: K) throws -> Int64? {
+    try decodeNullable(type, forKey: key)
+  }
+
+  func decodeIfPresent(_ type: String.Type, forKey key: K) throws -> String? {
+    try decodeNullable(type, forKey: key)
+  }
+
+  func decodeIfPresent<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T? {
+    try decodeNullable(type, forKey: key)
+  }
+
+  private func decodeNullable<T: Decodable>(_ type: T.Type, forKey key: K) throws -> T? {
+    guard contains(key) else {
+      guard !K.requiredNullable.contains(key.stringValue) else {
+        throw DecodingError.keyNotFound(
+          key, DecodingError.Context(codingPath: codingPath, debugDescription: "Missing."))
+      }
+      return nil
+    }
+    return try decodeNil(forKey: key) ? nil : decode(T.self, forKey: key)
+  }
+}
+
+extension KeyedEncodingContainer where K: RequiredNullableKeys {
+  mutating func encodeIfPresent(_ value: Int64?, forKey key: K) throws {
+    try encodeNullable(value, forKey: key)
+  }
+
+  mutating func encodeIfPresent(_ value: String?, forKey key: K) throws {
+    try encodeNullable(value, forKey: key)
+  }
+
+  mutating func encodeIfPresent<T: Encodable>(_ value: T?, forKey key: K) throws {
+    try encodeNullable(value, forKey: key)
+  }
+
+  private mutating func encodeNullable<T: Encodable>(_ value: T?, forKey key: K) throws {
+    if let value {
+      try encode(value, forKey: key)
+    } else if K.requiredNullable.contains(key.stringValue) {
+      try encodeNil(forKey: key)
+    }
+  }
 }

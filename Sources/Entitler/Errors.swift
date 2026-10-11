@@ -247,23 +247,23 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
   /// Whether this version of the SDK knows the code; an unknown one is kept as the API sent it.
   public var isKnown: Bool { Self.known.contains(rawValue) }
 
-  private static let known: Set<String> = [
-    "allowance_reached", "already_connected", "as_of_not_allowed", "billed_elsewhere",
-    "body_too_large", "browser_not_allowed", "cap_reached", "capability_required",
-    "carry_forward_conflict", "catalogue_not_empty", "change_locked", "change_required",
-    "connection_failed", "connection_in_use", "connection_mode", "connection_required",
-    "connection_unreadable", "credential_not_allowed", "customer_not_found", "email_taken",
-    "email_unconfirmed", "experiment_running", "feature_not_found", "hold_expired",
-    "hold_released", "hold_settled", "http_error", "idempotency_key_required",
-    "idempotency_mismatch", "invalid_amount", "invalid_body", "invalid_idempotency_key",
-    "invalid_occurred_at", "invalid_path", "invalid_response", "last_environment", "limit_reached",
-    "listing_gaps", "listing_invalid", "method_not_allowed", "not_found", "not_listed",
-    "not_metered", "not_self_serve", "payment_required", "person_required", "plan_still_billed",
-    "provider_account_changed", "provider_partial", "publication_failed", "rate_limited",
-    "registration_closed", "return_url_required", "review_required", "scope_required",
-    "sign_ups_closed", "stale", "switch_in_use", "switch_needed", "switch_off", "timed_out",
-    "too_many_customers", "track_closed", "unauthorised", "unavailable",
+  static let all: [ErrorCode] = [
+    .allowanceReached, .alreadyConnected, .asOfNotAllowed, .billedElsewhere, .bodyTooLarge,
+    .browserNotAllowed, .connectionFailed, .invalidResponse, .timedOut, .capabilityRequired,
+    .capReached, .carryForwardConflict, .catalogueNotEmpty, .changeLocked, .changeRequired,
+    .connectionInUse, .connectionMode, .connectionRequired, .connectionUnreadable,
+    .credentialNotAllowed, .customerNotFound, .emailTaken, .emailUnconfirmed, .experimentRunning,
+    .featureNotFound, .holdExpired, .holdReleased, .holdSettled, .httpError,
+    .idempotencyKeyRequired, .idempotencyMismatch, .`internal`, .invalidAmount, .invalidBody,
+    .invalidIdempotencyKey, .invalidOccurredAt, .invalidPath, .lastEnvironment, .limitReached,
+    .listingGaps, .listingInvalid, .methodNotAllowed, .notFound, .notListed, .notMetered,
+    .notSelfServe, .paymentRequired, .personRequired, .planStillBilled, .providerAccountChanged,
+    .providerPartial, .publicationFailed, .rateLimited, .registrationClosed, .returnURLRequired,
+    .reviewRequired, .scopeRequired, .signUpsClosed, .snapshotKeyUnavailable, .stale, .switchInUse,
+    .switchNeeded, .switchOff, .tooManyCustomers, .trackClosed, .unauthorised, .unavailable,
   ]
+
+  private static let known = Set(all.map(\.rawValue))
 
   /// The organisation's allowance is used up.
   public static let allowanceReached = ErrorCode(rawValue: "allowance_reached")
@@ -381,6 +381,8 @@ public struct ErrorCode: RawRepresentable, Hashable, Sendable, Codable, CustomSt
   public static let scopeRequired = ErrorCode(rawValue: "scope_required")
   /// Sign-ups are closed.
   public static let signUpsClosed = ErrorCode(rawValue: "sign_ups_closed")
+  /// The environment has no snapshot signing key yet, so no snapshot can be issued.
+  public static let snapshotKeyUnavailable = ErrorCode(rawValue: "snapshot_key_unavailable")
   /// The request no longer matches the state, or no payment provider can take it.
   public static let stale = ErrorCode(rawValue: "stale")
   /// The switch is in use.
