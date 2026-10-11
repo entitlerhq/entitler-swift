@@ -27,6 +27,52 @@ import Testing
     }
   }
 
+  @Test(arguments: ["ent_sk 1", "ent_sk\t1", "ent_sk_é1", "ent_sk_\u{07}1", "ent_sk_\u{7F}1"])
+  func credentialsOutsidePrintableASCIIFailAsBlank(_ bad: String) {
+    let key = "Provide an Entitler API key from the dashboard."
+    #expect(throws: ArgumentError(message: key)) { try EntitlerServer(key: bad) }
+    #expect(throws: ArgumentError(message: key)) { try EntitlerClient(key: "ent_pk_" + bad) }
+    #expect(throws: ArgumentError(message: key)) {
+      try EntitlerClient(key: "ent_pk_" + bad, identityToken: "id")
+    }
+    #expect(throws: ArgumentError(message: key)) {
+      try EntitlerClient(key: "ent_pk_" + bad, identityTokenProvider: { "id" })
+    }
+    #expect(throws: ArgumentError(message: "Provide a customer token minted by your server.")) {
+      try EntitlerClient(token: bad)
+    }
+    #expect(
+      throws: ArgumentError(message: "Provide the identity token your sign-in provider issued.")
+    ) {
+      try EntitlerClient(key: "ent_pk_test_1", identityToken: bad)
+    }
+    #expect(throws: Never.self) { try EntitlerServer(key: " \tent_sk_1\n") }
+  }
+
+  @Test(arguments: [" a", "\t", "é", "\u{07}"])
+  func providerAnswersOutsidePrintableASCIIAreUnreadable(_ bad: String) async throws {
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let jwt = makeJWT(["sub": "u"])
+    let middle = jwt.index(jwt.startIndex, offsetBy: jwt.count / 2)
+    let token = String(jwt[..<middle]) + bad + String(jwt[middle...])
+    for client in [
+      try EntitlerClient(tokenProvider: { token }, options: api.options()).me,
+      try EntitlerClient(key: "ent_pk_1", identityTokenProvider: { token }, options: api.options())
+        .me,
+    ] as [any Customer] {
+      do {
+        _ = try await api.run { try await client.check("sso") }
+        Issue.record("Expected a token error")
+      } catch EntitlerError.token(let error) {
+        #expect(
+          error.message
+            == "The token provider answered a token that is not a readable JWT with an expiry.")
+        #expect(!error.message.contains(token))
+      }
+    }
+    #expect(api.count == 0)
+  }
+
   @Test func eachClientRefusesTheOtherKind() {
     let publishable =
       "A publishable key belongs in EntitlerClient. Use a secret key from the dashboard on your server."

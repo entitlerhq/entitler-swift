@@ -120,7 +120,7 @@ actor TokenSource: CustomStringConvertible, CustomReflectable {
       guard !token.isEmpty else {
         throw EntitlerError.token(TokenError(message: blankMessage, underlyingError: nil))
       }
-      guard JWT.lifetime(token) != nil else {
+      guard token.isHeaderSafe, JWT.lifetime(token) != nil else {
         throw EntitlerError.token(
           TokenError(
             message:

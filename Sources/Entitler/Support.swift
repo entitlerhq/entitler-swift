@@ -248,7 +248,15 @@ func require(_ value: String, _ message: String) throws -> String {
 }
 
 func requireCredential(_ value: String, _ message: String) throws -> String {
-  try require(value, message).trimmed
+  let credential = value.trimmed
+  guard !credential.isEmpty, credential.isHeaderSafe else {
+    throw ArgumentError(message: message)
+  }
+  return credential
+}
+
+extension String {
+  var isHeaderSafe: Bool { utf8.allSatisfy { (0x21...0x7E).contains($0) } }
 }
 
 enum Messages {
