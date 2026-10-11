@@ -65,6 +65,9 @@ do {
 } catch EntitlerError.usageRefused(let answer) {
   print("Out of credits; upgrade to", answer.upgrades.first?.name ?? "a bigger plan")
   return
+} catch EntitlerError.usageReplayed(let answer) {
+  print("This message was already answered and charged:", answer.outcome.rawValue)
+  return
 }
 try await hold.run { hold in
   try hold.use(0)
@@ -106,14 +109,24 @@ key. A failure while `run(_:)` disposes of a hold goes to `onError` instead.
 `withHold` is `startHold` then `run`, and answers the work's own result:
 
 ```swift
-let summary = try await customer.withHold(
-  of: Features.aiCredits, amount: 500, idempotencyKey: "summary-\(jobID)"
-) { hold in
-  let answer = try await summarise(document)
-  try hold.use(answer.tokens)
-  return answer.summary
+do {
+  let summary = try await customer.withHold(
+    of: Features.aiCredits, amount: 500, idempotencyKey: "summary-\(jobID)"
+  ) { hold in
+    let answer = try await summarise(document)
+    try hold.use(answer.tokens)
+    return answer.summary
+  }
+  print(summary)
+} catch EntitlerError.usageRefused(let answer) {
+  print("Out of credits; upgrade to", answer.upgrades.first?.name ?? "a bigger plan")
+} catch EntitlerError.usageReplayed(let answer) {
+  print("This summary was already made and charged:", answer.outcome.rawValue)
 }
 ```
+
+In a route, answer a refusal with `402 Payment Required` and the upgrade it offers, and a replay
+with the earlier work's stored result: neither is a server error.
 
 A `usageSettlement` error from it carries the work's result in `result`.
 

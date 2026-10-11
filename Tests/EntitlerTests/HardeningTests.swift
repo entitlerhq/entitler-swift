@@ -125,6 +125,99 @@ import Testing
   }
 }
 
+@Suite struct LibraryErrorTests {
+  struct Leaky: Error {
+    let headers = ["Authorization": "Bearer ent_sk_secret"]
+  }
+
+  @Test func everyHTTPClientFailureBecomesASanitisedConnectionError() async throws {
+    let secret: [String: Any] = [
+      NSURLErrorFailingURLErrorKey: URL(string: "https://api.entitler.dev/v1?secret=1")!,
+      "headers": "Authorization: Bearer ent_sk_secret",
+    ]
+    let failures: [(any Error, URLError.Code)] = [
+      (URLError(.cannotDecodeContentData, userInfo: secret), .cannotDecodeContentData),
+      (URLError(.networkConnectionLost, userInfo: secret), .networkConnectionLost),
+      (NSError(domain: "zlib", code: -3, userInfo: secret), .unknown),
+      (Leaky(), .unknown),
+    ]
+    for (failure, code) in failures {
+      let server = try EntitlerServer(
+        key: "ent_sk_secret", cache: nil, options: FakeAPI().options { $0.maxRetries = 0 },
+        exchange: { _ in throw failure })
+      do {
+        _ = try await server.customer("u").check("sso")
+        Issue.record("Expected a connection error")
+      } catch EntitlerError.connection(let error) {
+        #expect((error.underlyingError as? URLError)?.code == code)
+        var dumped = ""
+        dump(EntitlerError.connection(error), to: &dumped)
+        #expect(!dumped.contains("secret"))
+        #expect(!String(reflecting: error).contains("secret"))
+        #expect(!error.message.contains("secret"))
+      }
+    }
+  }
+}
+
+@Suite struct HeaderNumberTests {
+  @Test func headerNumbersSaturateHoweverLong() {
+    let long = String(repeating: "9", count: 400)
+    #expect(headerNumber(long) == .max)
+    #expect(headerNumber(" 60 ") == 60)
+    for invalid in ["", "-1", "1e3", "inf", "0x10", "6 0"] { #expect(headerNumber(invalid) == nil) }
+    #expect(retryAfterSeconds(long, now: Date()) == TimeInterval(Int.max))
+    let entry = CacheEntry(
+      body: "{}", etag: nil, cacheControl: "private, max-age=\(long)", age: Int.max,
+      receivedAt: Date(timeIntervalSince1970: 0))
+    #expect(entry.maxAge == TimeInterval(Int.max))
+    #expect(!entry.isFresh(at: Date(timeIntervalSince1970: 0)))
+  }
+
+  @Test func longHeadersAreReadAndKept() async throws {
+    let long = String(repeating: "9", count: 400)
+    let api = FakeAPI { _ in
+      .json(
+        Fixture.check(),
+        headers: ["Cache-Control": "max-age=\(long)", "Age": long, "ETag": "\"e\""])
+    }
+    let server = try api.server()
+    let customer = try server.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      _ = try await customer.check("sso")
+    }
+    #expect(api.count == 2)
+    #expect(api.last.header("If-None-Match") == "\"e\"")
+    let fresh = FakeAPI { _ in
+      .json(Fixture.check(), headers: ["Cache-Control": "max-age=\(long)", "ETag": "\"e\""])
+    }
+    let kept = try fresh.server().customer("u")
+    try await fresh.run {
+      _ = try await kept.check("sso")
+      fresh.advance(86_400 * 365)
+      _ = try await kept.check("sso")
+    }
+    #expect(fresh.count == 1)
+  }
+
+  @Test func aLongRetryAfterIsBeyondTheLongestRetryDelay() async throws {
+    let api = FakeAPI { _ in
+      .json(
+        #"{"code":"rate_limited","message":"Slow down."}"#, status: 429,
+        headers: ["Retry-After": String(repeating: "9", count: 400)])
+    }
+    let server = try api.server(cache: nil)
+    do {
+      _ = try await api.run { try await server.customer("u").check("sso") }
+      Issue.record("Expected an error")
+    } catch EntitlerError.api(let error) {
+      #expect(error.retryAfter == TimeInterval(Int.max))
+    }
+    #expect(api.count == 1)
+  }
+}
+
 @Suite struct CacheHardeningTests {
   @Test func keysFollowTheVersionOneFormat() throws {
     let server = try EntitlerServer(
@@ -769,6 +862,34 @@ import Testing
     }
     #expect(api.count == 3)
     #expect(api.last.header("If-None-Match") == "\"e\"")
+  }
+
+  @Test func anAnswerWhoseCustomerWasForgottenInFlightIsRevalidated() async throws {
+    let state = Box<ClientState?>(nil)
+    let gets = Box(0)
+    let server = try EntitlerServer(
+      key: "ent_sk_1", cache: MemoryCacheStore(capacity: 10),
+      options: EntitlerOptions(maxRetries: 0),
+      exchange: { request in
+        let first = gets.with { count -> Bool in
+          count += 1
+          return count == 1
+        }
+        if first, let state = state.get {
+          await state.bump("a", at: Date())
+          for index in 0..<10_001 { await state.bump("o\(index)", at: Date()) }
+        }
+        let http = HTTPURLResponse(
+          url: request.url!, statusCode: 200, httpVersion: nil,
+          headerFields: ["Cache-Control": "max-age=300", "ETag": "\"e\""])!
+        return (Data(Fixture.check().utf8), http)
+      })
+    state.with { $0 = server.core.state }
+    let customer = try server.customer("a")
+    _ = try await customer.check("sso")
+    #expect(await server.core.state.generation(of: "a").generation == 0)
+    _ = try await customer.check("sso")
+    #expect(gets.get == 2)
   }
 
   @Test func perCustomerStateStaysBounded() async throws {

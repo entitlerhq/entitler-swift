@@ -1426,7 +1426,9 @@ public struct ProviderPage: Codable, Hashable, Sendable {
 }
 
 /// A signed entitlements snapshot, for checks without a connection.
-public struct IssuedSnapshot: Codable, Hashable, Sendable {
+public struct IssuedSnapshot: Codable, Hashable, Sendable, CustomStringConvertible,
+  CustomDebugStringConvertible, CustomReflectable
+{
   /// The compact JWS. Verify it with ``verifySnapshot(_:expecting:)``.
   public let token: String
   /// When it expires.
@@ -1437,6 +1439,19 @@ public struct IssuedSnapshot: Codable, Hashable, Sendable {
   enum CodingKeys: String, CodingKey {
     case token, expiresAt
     case keyID = "keyId"
+  }
+
+  /// The expiry and key id, never the token.
+  public var description: String {
+    "IssuedSnapshot(expiresAt: \(formatInstant(expiresAt)), keyID: \(keyID))"
+  }
+
+  /// The same as ``description``: the token is never shown.
+  public var debugDescription: String { description }
+
+  /// A mirror that leaves the token out.
+  public var customMirror: Mirror {
+    Mirror(self, children: ["expiresAt": expiresAt, "keyID": keyID])
   }
 }
 

@@ -59,12 +59,14 @@ public struct CacheEntry: Codable, Hashable, Sendable {
   }
 
   var maxAge: TimeInterval? {
-    directives.first { $0.hasPrefix("max-age=") }.flatMap { TimeInterval($0.dropFirst(8)) }
+    directives.first { $0.hasPrefix("max-age=") }.flatMap { headerNumber($0.dropFirst(8)) }.map {
+      TimeInterval($0)
+    }
   }
 
   func isFresh(at now: Date) -> Bool {
     guard let maxAge, !directives.contains("no-cache") else { return false }
-    return now.timeIntervalSince(receivedAt) + TimeInterval(age ?? 0) < maxAge
+    return now.timeIntervalSince(receivedAt) + TimeInterval(max(0, age ?? 0)) < maxAge
   }
 }
 

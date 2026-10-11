@@ -142,6 +142,25 @@ import Testing
     #expect(!String(reflecting: issued).contains("secret"))
     #expect(!"\(issued)".contains("secret"))
     #expect(issued.token == "tok_secret")
+    let snapshot = try JSON.decoder().decode(
+      IssuedSnapshot.self,
+      from: Data(
+        #"{"token":"jws_secret","expiresAt":"2026-10-11T10:00:00Z","keyId":"k1"}"#.utf8))
+    let source = TokenSource(fixed: "tok_secret")
+    for value in [
+      snapshot as Any, Credential.server(key: "ent_sk_secret"),
+      Credential.publishable(key: "ent_pk_secret"), Credential.token(source),
+      Credential.identity(key: "ent_pk_secret", source), source,
+    ] {
+      var dumped = ""
+      dump(value, to: &dumped)
+      #expect(!dumped.contains("secret"))
+      #expect(!String(describing: value).contains("secret"))
+      #expect(!String(reflecting: value).contains("secret"))
+    }
+    #expect(
+      snapshot.description == "IssuedSnapshot(expiresAt: 2026-10-11T10:00:00.000Z, keyID: k1)")
+    #expect(snapshot.token == "jws_secret")
     #expect(try server.customer("u").description == "ServerCustomer(u)")
     #expect(client.me.description == "SignedInCustomer(me)")
   }

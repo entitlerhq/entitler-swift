@@ -85,41 +85,41 @@ print(check.remaining)
 Declare one by hand with `Feature<OnOff>("export_pdf")`, `Feature<Config>`, `Feature<Metered>`
 or `Feature<FeatureGroup>`. The generator also runs as a command plugin:
 `swift package entitler-generate --out Sources/App/EntitlerFeatures.swift`. See
-[the generator guide](docs/generator.md).
+[the generator guide](https://github.com/entitlerhq/entitler-swift/blob/main/docs/generator.md).
 
 ## Guides
 
-- [Checking access](docs/checking-access.md)
-- [Recording usage](docs/recording-usage.md)
-- [Pricing pages and visitors](docs/pricing-and-visitors.md)
-- [Billing pages](docs/billing.md)
-- [Company decisions](docs/company-decisions.md)
-- [Store purchases](docs/store-purchases.md)
-- [The in-app client](docs/in-app-client.md)
-- [Offline snapshots](docs/offline-snapshots.md)
-- [Reliability](docs/reliability.md)
-- [Errors](docs/errors.md)
-- [As-of reads](docs/as-of.md)
-- [Tracks](docs/tracks.md)
-- [Scopes](docs/scopes.md)
-- [Configuration](docs/configuration.md)
-- [Testing your app](docs/testing.md)
-- [Feature constants and the command-line tool](docs/generator.md)
-- [SwiftUI](docs/swiftui.md)
-- [Server-side Swift: Vapor and Hummingbird](docs/server-side-swift.md)
-- [Versioning and support](docs/versioning.md)
+- [Checking access](https://github.com/entitlerhq/entitler-swift/blob/main/docs/checking-access.md)
+- [Recording usage](https://github.com/entitlerhq/entitler-swift/blob/main/docs/recording-usage.md)
+- [Pricing pages and visitors](https://github.com/entitlerhq/entitler-swift/blob/main/docs/pricing-and-visitors.md)
+- [Billing pages](https://github.com/entitlerhq/entitler-swift/blob/main/docs/billing.md)
+- [Company decisions](https://github.com/entitlerhq/entitler-swift/blob/main/docs/company-decisions.md)
+- [Store purchases](https://github.com/entitlerhq/entitler-swift/blob/main/docs/store-purchases.md)
+- [The in-app client](https://github.com/entitlerhq/entitler-swift/blob/main/docs/in-app-client.md)
+- [Offline snapshots](https://github.com/entitlerhq/entitler-swift/blob/main/docs/offline-snapshots.md)
+- [Reliability](https://github.com/entitlerhq/entitler-swift/blob/main/docs/reliability.md)
+- [Errors](https://github.com/entitlerhq/entitler-swift/blob/main/docs/errors.md)
+- [As-of reads](https://github.com/entitlerhq/entitler-swift/blob/main/docs/as-of.md)
+- [Tracks](https://github.com/entitlerhq/entitler-swift/blob/main/docs/tracks.md)
+- [Scopes](https://github.com/entitlerhq/entitler-swift/blob/main/docs/scopes.md)
+- [Configuration](https://github.com/entitlerhq/entitler-swift/blob/main/docs/configuration.md)
+- [Testing your app](https://github.com/entitlerhq/entitler-swift/blob/main/docs/testing.md)
+- [Feature constants and the command-line tool](https://github.com/entitlerhq/entitler-swift/blob/main/docs/generator.md)
+- [SwiftUI](https://github.com/entitlerhq/entitler-swift/blob/main/docs/swiftui.md)
+- [Server-side Swift: Vapor and Hummingbird](https://github.com/entitlerhq/entitler-swift/blob/main/docs/server-side-swift.md)
+- [Versioning and support](https://github.com/entitlerhq/entitler-swift/blob/main/docs/versioning.md)
 
 The API reference is on the
 [Swift Package Index](https://swiftpackageindex.com/entitlerhq/entitler-swift/documentation/entitler).
 
 ## Examples
 
-[`examples/`](examples/README.md) holds runnable programs: [quickstart](examples/quickstart),
-[pricing page](examples/pricing-page), [in-app](examples/in-app),
-[metered work](examples/metered-work), [offline](examples/offline), [billing](examples/billing),
-[generated features](examples/generated-features), a
-[SwiftUI view model](examples/swiftui-view-model) and [testing](examples/testing).
+[`examples/`](https://github.com/entitlerhq/entitler-swift/blob/main/examples/README.md) holds runnable programs: [quickstart](https://github.com/entitlerhq/entitler-swift/tree/main/examples/quickstart),
+[pricing page](https://github.com/entitlerhq/entitler-swift/tree/main/examples/pricing-page), [in-app](https://github.com/entitlerhq/entitler-swift/tree/main/examples/in-app),
+[metered work](https://github.com/entitlerhq/entitler-swift/tree/main/examples/metered-work), [offline](https://github.com/entitlerhq/entitler-swift/tree/main/examples/offline), [billing](https://github.com/entitlerhq/entitler-swift/tree/main/examples/billing),
+[generated features](https://github.com/entitlerhq/entitler-swift/tree/main/examples/generated-features), a
+[SwiftUI view model](https://github.com/entitlerhq/entitler-swift/tree/main/examples/swiftui-view-model) and [testing](https://github.com/entitlerhq/entitler-swift/tree/main/examples/testing).
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/entitlerhq/entitler-swift/blob/main/LICENSE).

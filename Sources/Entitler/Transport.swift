@@ -33,11 +33,26 @@ func validTimeout(_ timeout: TimeInterval) throws -> TimeInterval {
   return timeout
 }
 
-enum Credential: Sendable {
+enum Credential: Sendable, CustomStringConvertible, CustomDebugStringConvertible,
+  CustomReflectable
+{
   case server(key: String)
   case publishable(key: String)
   case token(TokenSource)
   case identity(key: String, TokenSource)
+
+  var kind: String {
+    switch self {
+    case .server: "server"
+    case .publishable: "in-app, publishable key"
+    case .token: "in-app, customer token"
+    case .identity: "in-app, identity token"
+    }
+  }
+
+  var description: String { "Credential(\(kind))" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: ["kind": kind]) }
 }
 
 package typealias Exchange = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
@@ -89,11 +104,17 @@ enum OutageAnswer: Sendable {
   case probe
 }
 
+struct ReadMark: Equatable {
+  let generation: UInt64
+  let forgets: UInt64
+}
+
 actor ClientState {
   private var generations: [String: (generation: UInt64, at: Date)] = [:]
   private var counter: UInt64 = 0
   private var outageUntil: Date?
   private var forgottenUntil: Date?
+  private var forgets: UInt64 = 0
   private var probing = false
   private(set) var signedInID: String?
 
@@ -104,6 +125,7 @@ actor ClientState {
     generations[customer] = (counter, now)
     guard generations.count > 10_000 else { return }
     let oldestKept = counter - 5_000
+    forgets += 1
     var kept: [String: (generation: UInt64, at: Date)] = [:]
     for (customer, entry) in generations {
       if entry.generation > oldestKept {
@@ -118,6 +140,10 @@ actor ClientState {
   func generation(of customer: String?) -> (generation: UInt64, at: Date?) {
     guard let customer, let kept = generations[customer] else { return (0, forgottenUntil) }
     return (kept.generation, kept.at)
+  }
+
+  func readMark(of customer: String?) -> ReadMark {
+    ReadMark(generation: generation(of: customer).generation, forgets: forgets)
   }
 
   func outageAnswer(at now: Date) -> OutageAnswer {
@@ -185,14 +211,7 @@ final class Core: Sendable, CustomReflectable {
     self.exchange = exchange
   }
 
-  var kind: String {
-    switch credential {
-    case .server: "server"
-    case .publishable: "in-app, publishable key"
-    case .token: "in-app, customer token"
-    case .identity: "in-app, identity token"
-    }
-  }
+  var kind: String { credential.kind }
 
   var isSignedIn: Bool {
     switch credential {
@@ -287,9 +306,10 @@ final class Core: Sendable, CustomReflectable {
     let token = request.authenticated ? try await currentToken() : nil
     let key = cacheKey(request, token: token)
     let kept = await entry(key, in: cache)
-    let started = await state.generation(of: request.customer)
+    let started = await state.readMark(of: request.customer)
+    let written = await state.generation(of: request.customer).at
     if !request.revalidate, let kept, kept.isFresh(at: hooks.now()),
-      started.at.map({ $0 < kept.receivedAt }) ?? true
+      written.map({ $0 < kept.receivedAt }) ?? true
     {
       return try decode(Response(kept))
     }
@@ -300,7 +320,7 @@ final class Core: Sendable, CustomReflectable {
     }
     do {
       let answer: Answer = try await askAPI(
-        request, token: token, key: key, kept: kept, started: started.generation, cache: cache)
+        request, token: token, key: key, kept: kept, started: started, cache: cache)
       if outage == .probe { await state.endProbe() }
       return answer
     } catch {
@@ -310,7 +330,7 @@ final class Core: Sendable, CustomReflectable {
   }
 
   private func askAPI<Answer: Decodable>(
-    _ request: Request, token: String?, key: String, kept: CacheEntry?, started: UInt64,
+    _ request: Request, token: String?, key: String, kept: CacheEntry?, started: ReadMark,
     cache: any CacheStore
   ) async throws -> Answer {
     let hooks = Hooks.current
@@ -338,7 +358,7 @@ final class Core: Sendable, CustomReflectable {
       let answer: Answer = try decode(entry.map(Response.init) ?? response)
       await state.reachable()
       if var entry {
-        if await state.generation(of: request.customer).generation != started {
+        if await state.readMark(of: request.customer) != started {
           entry.cacheControl = (entry.cacheControl.map { $0 + ", " } ?? "") + "no-cache"
         }
         await store(entry, key: key, in: cache)
@@ -617,11 +637,15 @@ func jsonString(_ text: String) -> String {
   return out + "\""
 }
 
+func headerNumber<Text: StringProtocol>(_ text: Text) -> Int? {
+  let digits = text.trimmingCharacters(in: .whitespaces)
+  guard !digits.isEmpty, digits.utf8.allSatisfy({ (0x30...0x39).contains($0) }) else { return nil }
+  return Int(digits) ?? .max
+}
+
 func retryAfterSeconds(_ value: String, now: Date) -> TimeInterval? {
   let value = value.trimmingCharacters(in: .whitespaces)
-  if !value.isEmpty, value.utf8.allSatisfy({ (0x30...0x39).contains($0) }) {
-    return TimeInterval(value) ?? .greatestFiniteMagnitude
-  }
+  if let seconds = headerNumber(value) { return TimeInterval(seconds) }
   let formatter = DateFormatter()
   formatter.locale = Locale(identifier: "en_US_POSIX")
   formatter.timeZone = TimeZone(identifier: "GMT")
@@ -649,7 +673,7 @@ extension Response {
       body: body,
       etag: http.value(forHTTPHeaderField: "ETag"),
       cacheControl: http.value(forHTTPHeaderField: "Cache-Control"),
-      age: http.value(forHTTPHeaderField: "Age").flatMap { Int($0.trimmed) },
+      age: http.value(forHTTPHeaderField: "Age").flatMap(headerNumber),
       requestID: http.value(forHTTPHeaderField: "x-request-id"),
       replayed: http.value(forHTTPHeaderField: "Idempotent-Replayed") == "true")
   }

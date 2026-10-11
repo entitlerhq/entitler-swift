@@ -23,7 +23,7 @@ try await customer.register(name: "Katherine Johnson")
 do {
   do {
     let hold = try await customer.startHold(
-      of: Features.aiCredits, amount: 8, idempotencyKey: "message-\(UUID().uuidString)")
+      of: Features.aiCredits, amount: 4, idempotencyKey: "message-\(UUID().uuidString)")
     try await hold.run { hold in
       try hold.use(0)
       for await total in streamTokens() {
@@ -33,12 +33,14 @@ do {
     print("Streamed reply charged for the tokens it used")
   } catch EntitlerError.usageRefused(let answer) {
     print("Not enough credits: \(answer.refusal?.rawValue ?? "refused")")
+  } catch EntitlerError.usageReplayed(let answer) {
+    print("This message was already streamed and charged (\(answer.outcome.rawValue))")
   }
 
   let document = "Orbital mechanics for the Friendship 7 flight."
   do {
     let summary = try await customer.withHold(
-      of: Features.aiCredits, amount: 10, idempotencyKey: "summary-\(UUID().uuidString)"
+      of: Features.aiCredits, amount: 5, idempotencyKey: "summary-\(UUID().uuidString)"
     ) { hold in
       let answer = try await summarise(document)
       try hold.use(answer.credits)
@@ -47,6 +49,8 @@ do {
     print("Summary: \(summary)")
   } catch EntitlerError.usageRefused(let answer) {
     print("Not enough credits: \(answer.refusal?.rawValue ?? "refused")")
+  } catch EntitlerError.usageReplayed(let answer) {
+    print("This summary was already made and charged (\(answer.outcome.rawValue))")
   }
 
   let observed = try await customer.recordUsage(

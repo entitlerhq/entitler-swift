@@ -22,12 +22,15 @@ enum JWT {
   }
 }
 
-actor TokenSource {
+actor TokenSource: CustomStringConvertible, CustomReflectable {
   private let provider: TokenProvider?
   private let blankMessage: String
   private(set) var current: String?
   private var refreshAt: Date?
   private var refreshing: Task<String, any Error>?
+
+  nonisolated var description: String { "TokenSource" }
+  nonisolated var customMirror: Mirror { Mirror(self, children: [:]) }
 
   init(fixed token: String) {
     provider = nil
