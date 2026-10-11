@@ -207,7 +207,10 @@ import Testing
       reply.delay = isFirst ? 0.3 : 0
       return reply
     }
-    let customer = try api.server().customer("u")
+    let customer = try api.server {
+      $0.maxRetries = 0
+      $0.timeout = 120
+    }.customer("u")
     let hooks = api.hooks
     let read = Task {
       try await Hooks.$current.withValue(hooks) { try await customer.check("sso") }
