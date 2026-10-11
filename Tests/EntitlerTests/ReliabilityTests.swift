@@ -393,24 +393,34 @@ import Testing
   @Test func aCancelledProbeEndsTheOutage() async throws {
     let api = FakeAPI(replies: [
       .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
-      .hanging, .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+      .error(503, code: "unavailable"), .json(Fixture.check(), headers: ["ETag": "\"f\""]),
     ])
-    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
-    let hooks = api.hooks
+    let customer = try api.server { $0.maxRetries = 1 }.customer("u")
     try await api.run {
       _ = try await customer.check("sso")
-      #expect(try await customer.check("sso").stale)
     }
+    api.answer { _ in .failure(.notConnectedToInternet) }
+    #expect(try await api.run { try await customer.check("sso") }.stale)
+    let afterOutage = api.count
     api.advance(31)
-    let probe = Task {
-      try await Hooks.$current.withValue(hooks) { try await customer.check("sso") }
+    var waiting = api.hooks
+    let retrying = Box(false)
+    waiting.sleep = { _ in
+      retrying.with { $0 = true }
+      try await Task.sleep(nanoseconds: 10_000_000_000)
     }
-    while api.count < 3 { await Task.yield() }
+    api.answer { _ in .error(503, code: "unavailable") }
+    let probe = Task {
+      try await Hooks.$current.withValue(waiting) { try await customer.check("sso") }
+    }
+    while !retrying.get { try await Task.sleep(nanoseconds: 1_000_000) }
     probe.cancel()
     _ = await probe.result
+    #expect(api.count == afterOutage + 1)
+    api.answer { _ in .json(Fixture.check(), headers: ["ETag": "\"f\""]) }
     let fresh = try await api.run { try await customer.check("sso") }
     #expect(!fresh.stale)
-    #expect(api.count == 4)
+    #expect(api.count == afterOutage + 2)
   }
 
   @Test func otherFailuresAreNotHiddenByStaleAnswers() async throws {
