@@ -191,6 +191,45 @@ final class RedirectRefuser: NSObject, URLSessionTaskDelegate, Sendable {
   }
 }
 
+extension URLSession {
+  #if canImport(FoundationNetworking)
+    func answer(to request: URLRequest) async throws -> (Data, URLResponse) {
+      typealias Waiting = CheckedContinuation<(Data, URLResponse), any Error>
+      let pending = LockedValue<(waiting: Waiting?, cancelled: Bool)>((nil, false))
+      return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+          let cancelled = pending.update { state in
+            if !state.cancelled { state.waiting = continuation }
+            return state.cancelled
+          }
+          guard !cancelled else { return continuation.resume(throwing: CancellationError()) }
+          let task = dataTask(with: request) { body, response, error in
+            guard let waiting = pending.update({ $0.waiting.take() }) else { return }
+            if let body, let response {
+              waiting.resume(returning: (body, response))
+            } else {
+              waiting.resume(throwing: error ?? URLError(.badServerResponse))
+            }
+          }
+          task.delegate = RedirectRefuser.shared
+          task.resume()
+        }
+      } onCancel: {
+        let waiting = pending.update { state in
+          state.cancelled = true
+          return state.waiting.take()
+        }
+        guard let waiting else { return }
+        DispatchQueue.global().async { waiting.resume(throwing: CancellationError()) }
+      }
+    }
+  #else
+    func answer(to request: URLRequest) async throws -> (Data, URLResponse) {
+      try await data(for: request, delegate: RedirectRefuser.shared)
+    }
+  #endif
+}
+
 @usableFromInline let defaultSession: URLSession = {
   let configuration = URLSessionConfiguration.default
   configuration.urlCache = nil
@@ -533,7 +572,7 @@ final class Core: Sendable, CustomReflectable {
       let answer = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) { group in
         group.addTask {
           if let exchange { return try await exchange(request) }
-          return try await session.data(for: request, delegate: RedirectRefuser.shared)
+          return try await session.answer(to: request)
         }
         group.addTask {
           try await hooks.deadline(timeout)

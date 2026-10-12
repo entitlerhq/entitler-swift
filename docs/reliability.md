@@ -7,7 +7,11 @@ connecting to the last byte. `URLRequest.timeoutInterval` is only an idle timeou
 each attempt against a timer; losing throws `EntitlerError.timeout`. Every method takes `timeout:`
 to override it for one call.
 
-Cancelling the task cancels the request and any retry wait at once, and throws `CancellationError`.
+Cancelling the task cancels the request and any retry wait at once, and throws
+`CancellationError`. On Linux the call returns at once in the same way, but the request itself is
+left to end on its own, with its idle timeout still applying: in swift-corelibs-foundation,
+cancelling a request as its answer arrives can deadlock or crash the process, so the SDK never
+cancels one there.
 
 ## Retries
 

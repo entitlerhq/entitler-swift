@@ -8,6 +8,18 @@ import Testing
 #endif
 
 @Suite struct RetryTests {
+  @Test func cancellingAsAnswersArriveNeverDeadlocks() async throws {
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let server = try api.server(cache: nil)
+    let customer = try server.customer("u")
+    for round in 0..<400 {
+      let call = Task { try await customer.check("sso") }
+      for _ in 0..<(round % 4) { await Task.yield() }
+      call.cancel()
+      _ = await call.result
+    }
+  }
+
   @Test(arguments: [408, 429, 500, 502, 503, 504])
   func retriesTransientStatuses(status: Int) async throws {
     let api = FakeAPI(replies: [.error(status, code: "unavailable"), .json(Fixture.check())])
