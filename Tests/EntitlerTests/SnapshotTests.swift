@@ -345,7 +345,7 @@ extension JSONWebKey {
       ])
   }
 
-  @Test func instantsParseAnyOffset() {
+  @Test func instantsParseAnyOffset() throws {
     #expect(parseInstant("2026-07-01T11:30:00+02:00") == Date(timeIntervalSince1970: 1_782_898_200))
     #expect(parseInstant("2026-07-01T09:30:00.000Z") == Date(timeIntervalSince1970: 1_782_898_200))
     #expect(parseInstant("yesterday") == nil)
@@ -360,6 +360,24 @@ extension JSONWebKey {
     #expect(parseInstant("0400-02-29T00:00:00Z") != nil)
     #expect(parseInstant("1900-02-29T00:00:00Z") == nil)
     #expect(formatInstant(Date(timeIntervalSince1970: 1_782_898_200)) == "2026-07-01T09:30:00.000Z")
+    for (text, seconds) in [
+      ("1970-01-01T00:00:00Z", 0.0), ("0001-01-01T00:00:00Z", -62_135_596_800),
+      ("9999-12-31T23:59:59Z", 253_402_300_799), ("1969-12-31T23:59:59.500Z", -0.5),
+      ("2000-02-29T12:00:00-01:30", 951_831_000), ("1600-03-01T00:00:00Z", -11_670_912_000),
+    ] {
+      let date = try #require(parseInstant(text), "\(text)")
+      #expect(date == Date(timeIntervalSince1970: seconds), "\(text)")
+      #expect(parseInstant(formatInstant(date)) == date, "\(text)")
+    }
+    #expect(
+      formatInstant(Date(timeIntervalSince1970: -62_135_596_800)) == "0001-01-01T00:00:00.000Z")
+    #expect(formatInstant(Date(timeIntervalSince1970: -0.25)) == "1969-12-31T23:59:59.750Z")
+    for invalid in [
+      "2026-07-01 09:30:00Z", "2026-07-01T09:30:00", "2026-07-01T09:30:00.Z",
+      "2026-07-01T09:30:00Zjunk", "2026-07-01T09:30:00+0200", "2026-7-01T09:30:00Z",
+    ] {
+      #expect(parseInstant(invalid) == nil, "\(invalid)")
+    }
   }
 
   @Test func base64URLRoundTrips() {

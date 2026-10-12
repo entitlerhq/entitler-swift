@@ -441,7 +441,7 @@ public enum FakeAnswers {
   }
 
   static func instant(_ date: Date) -> String {
-    Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(date)
+    formatInstant(date)
   }
 
   static func orNull(_ value: Any?) -> Any { value ?? NSNull() }

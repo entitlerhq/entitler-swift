@@ -892,6 +892,55 @@ import Testing
     #expect(gets.get == 2)
   }
 
+  @Test func aReadAnsweredAfterAWriteOnAStillClockIsKeptFresh() async throws {
+    let api = FakeAPI { request in
+      request.method == "GET"
+        ? .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+        : .json(Fixture.planChange())
+    }
+    let customer = try api.server().customer("a")
+    try await api.run {
+      _ = try await customer.check("sso")
+      _ = try await customer.cancel()
+      _ = try await customer.check("sso")
+      _ = try await customer.check("sso")
+    }
+    #expect(api.count == 3)
+    #expect(api.last.header("If-None-Match") == "\"e\"")
+  }
+
+  @Test func anAnswerExactlyMaxAgeOldIsNotFreshOnAStillClock() async throws {
+    let api = FakeAPI { request in
+      request.method == "GET"
+        ? .json(
+          Fixture.check(), headers: ["Cache-Control": "max-age=60", "Age": "60", "ETag": "\"e\""])
+        : .json(Fixture.planChange())
+    }
+    let customer = try api.server().customer("a")
+    try await api.run {
+      _ = try await customer.cancel()
+      _ = try await customer.check("sso")
+      _ = try await customer.check("sso")
+    }
+    #expect(api.count == 3)
+    let ahead = CacheEntry(
+      body: "{}", etag: nil, cacheControl: "max-age=60", age: 60,
+      receivedAt: Date(timeIntervalSince1970: 1))
+    #expect(!ahead.isFresh(at: Date(timeIntervalSince1970: 0)))
+  }
+
+  @Test func stampsMoveForwardOnEveryReading() async {
+    let state = ClientState()
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let first = await state.stamp(now)
+    let second = await state.stamp(now)
+    let third = await state.stamp(now.addingTimeInterval(-5))
+    #expect(first == now)
+    #expect(second > first && second.timeIntervalSince(first) <= 0.000_001_5)
+    #expect(third > second)
+    #expect(await state.stamp(now.addingTimeInterval(1)) == now.addingTimeInterval(1))
+  }
+
   @Test func perCustomerStateStaysBounded() async throws {
     let state = ClientState()
     let now = Date(timeIntervalSince1970: 1_800_000_000)

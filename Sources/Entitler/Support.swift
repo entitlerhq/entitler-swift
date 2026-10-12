@@ -146,20 +146,6 @@ enum JSON {
 }
 
 func parseInstant(_ text: String) -> Date? {
-  guard hasRealFields(text) else { return nil }
-  let year = text.prefix(5)
-  guard year.count == 5, year.last == "-", year.dropLast().allSatisfy(\.isASCIIDigit),
-    year.dropLast() != "0000"
-  else { return nil }
-  let cycles = max(0, (1999 - Int(year.dropLast())!) / 400)
-  let shifted = String(format: "%04d", Int(year.dropLast())! + cycles * 400) + text.dropFirst(4)
-  let date =
-    (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(shifted))
-    ?? (try? Date.ISO8601FormatStyle().parse(shifted))
-  return date?.addingTimeInterval(-Double(cycles) * 146_097 * 86_400)
-}
-
-private func hasRealFields(_ text: String) -> Bool {
   let scalars = Array(text.utf8)
   func number(_ start: Int, _ length: Int) -> Int? {
     guard start + length <= scalars.count else { return nil }
@@ -170,34 +156,78 @@ private func hasRealFields(_ text: String) -> Bool {
     }
     return value
   }
+  func byte(_ index: Int) -> UInt8? { index < scalars.count ? scalars[index] : nil }
   guard let year = number(0, 4), let month = number(5, 2), let day = number(8, 2),
     let hour = number(11, 2), let minute = number(14, 2), let second = number(17, 2),
+    year > 0, byte(4) == UInt8(ascii: "-"), byte(7) == UInt8(ascii: "-"),
+    byte(10) == UInt8(ascii: "T"), byte(13) == UInt8(ascii: ":"), byte(16) == UInt8(ascii: ":"),
     (1...12).contains(month), hour <= 23, minute <= 59, second <= 59
-  else { return false }
+  else { return nil }
   let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
   let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
-  guard (1...days).contains(day) else { return false }
+  guard (1...days).contains(day) else { return nil }
   var index = 19
-  if index < scalars.count, scalars[index] == UInt8(ascii: ".") {
+  var fraction = 0.0
+  if byte(index) == UInt8(ascii: ".") {
     index += 1
-    while index < scalars.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(scalars[index]) {
+    var scale = 0.1
+    let first = index
+    while let digit = byte(index), (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(digit) {
+      fraction += Double(digit - UInt8(ascii: "0")) * scale
+      scale /= 10
       index += 1
     }
+    guard index > first else { return nil }
   }
-  guard index < scalars.count, scalars[index] != UInt8(ascii: "Z"),
-    scalars[index] != UInt8(ascii: "z")
-  else { return true }
-  guard let offsetHours = number(index + 1, 2), let offsetMinutes = number(index + 4, 2) else {
-    return false
+  var offset = 0
+  switch byte(index) {
+  case UInt8(ascii: "Z"):
+    index += 1
+  case UInt8(ascii: "+"), UInt8(ascii: "-"):
+    guard let offsetHours = number(index + 1, 2), byte(index + 3) == UInt8(ascii: ":"),
+      let offsetMinutes = number(index + 4, 2), offsetHours <= 23, offsetMinutes <= 59
+    else { return nil }
+    offset = (offsetHours * 60 + offsetMinutes) * 60 * (byte(index) == UInt8(ascii: "-") ? -1 : 1)
+    index += 6
+  default:
+    return nil
   }
-  return offsetHours <= 23 && offsetMinutes <= 59
+  guard index == scalars.count else { return nil }
+  let seconds =
+    daysFromCivil(year: year, month: month, day: day) * 86_400 + hour * 3_600 + minute * 60
+    + second - offset
+  return Date(timeIntervalSince1970: Double(seconds) + fraction)
 }
 
-func formatInstant(_ date: Date) -> String {
-  let millis = (date.timeIntervalSince1970 * 1000).rounded()
-  let seconds = (millis / 1000).rounded(.down)
-  let whole = Date.ISO8601FormatStyle().format(Date(timeIntervalSince1970: seconds))
-  return whole.dropLast() + String(format: ".%03dZ", Int(millis - seconds * 1000))
+private func daysFromCivil(year: Int, month: Int, day: Int) -> Int {
+  let shifted = month <= 2 ? year - 1 : year
+  let era = (shifted >= 0 ? shifted : shifted - 399) / 400
+  let yearOfEra = shifted - era * 400
+  let dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1
+  let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+  return era * 146_097 + dayOfEra - 719_468
+}
+
+private func civilFromDays(_ days: Int) -> (year: Int, month: Int, day: Int) {
+  let shifted = days + 719_468
+  let era = (shifted >= 0 ? shifted : shifted - 146_096) / 146_097
+  let dayOfEra = shifted - era * 146_097
+  let yearOfEra = (dayOfEra - dayOfEra / 1_460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
+  let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+  let monthIndex = (5 * dayOfYear + 2) / 153
+  let month = monthIndex < 10 ? monthIndex + 3 : monthIndex - 9
+  let year = yearOfEra + era * 400 + (month <= 2 ? 1 : 0)
+  return (year, month, dayOfYear - (153 * monthIndex + 2) / 5 + 1)
+}
+
+package func formatInstant(_ date: Date) -> String {
+  let millis = Int(max(-9e18, min(9e18, (date.timeIntervalSince1970 * 1000).rounded())))
+  let (days, millisOfDay) = millis.quotientAndRemainder(dividingBy: 86_400_000)
+  let (day, time) = millisOfDay < 0 ? (days - 1, millisOfDay + 86_400_000) : (days, millisOfDay)
+  let civil = civilFromDays(day)
+  return String(
+    format: "%04ld-%02ld-%02ldT%02ld:%02ld:%02ld.%03ldZ", civil.year, civil.month, civil.day,
+    time / 3_600_000, time / 60_000 % 60, time / 1_000 % 60, time % 1_000)
 }
 
 extension Character {

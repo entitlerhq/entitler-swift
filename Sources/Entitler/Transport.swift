@@ -115,14 +115,21 @@ actor ClientState {
   private var outageUntil: Date?
   private var forgottenUntil: Date?
   private var forgets: UInt64 = 0
+  private var lastStamp: Date?
   private var probing = false
   private(set) var signedInID: String?
 
   var trackedCustomers: Int { generations.count }
 
+  func stamp(_ now: Date) -> Date {
+    let next = lastStamp.map { now > $0 ? now : $0.addingTimeInterval(0.000_001) } ?? now
+    lastStamp = next
+    return next
+  }
+
   func bump(_ customer: String, at now: Date) {
     counter += 1
-    generations[customer] = (counter, now)
+    generations[customer] = (counter, stamp(now))
     guard generations.count > 10_000 else { return }
     let oldestKept = counter - 5_000
     forgets += 1
@@ -336,6 +343,7 @@ final class Core: Sendable, CustomReflectable {
     let hooks = Hooks.current
     do {
       let response = try await send(request, token: token, ifNoneMatch: kept?.etag)
+      let receivedAt = await state.stamp(hooks.now())
       var entry: CacheEntry?
       if response.status == 304 {
         guard let kept else {
@@ -347,13 +355,13 @@ final class Core: Sendable, CustomReflectable {
         entry = CacheEntry(
           body: kept.body, etag: response.etag ?? kept.etag,
           cacheControl: response.cacheControl ?? kept.cacheControl, age: response.age ?? kept.age,
-          receivedAt: hooks.now())
+          receivedAt: receivedAt)
       } else if !response.noStore,
         response.etag != nil || response.cacheControl?.lowercased().contains("max-age") == true
       {
         entry = CacheEntry(
           body: String(decoding: response.body, as: UTF8.self), etag: response.etag,
-          cacheControl: response.cacheControl, age: response.age, receivedAt: hooks.now())
+          cacheControl: response.cacheControl, age: response.age, receivedAt: receivedAt)
       }
       let answer: Answer = try decode(entry.map(Response.init) ?? response)
       await state.reachable()
