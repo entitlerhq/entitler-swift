@@ -6,3 +6,9 @@ DerivedData/
 .swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
+/examples/.build
+/examples/doc-snippets/*
+!/examples/doc-snippets/Placeholder.swift
+/examples/Package.resolved
+Package.resolved
+*.profraw

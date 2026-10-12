@@ -1,0 +1,770 @@
+import Foundation
+import Testing
+
+@testable import Entitler
+
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
+@Suite struct RetryTests {
+  #if canImport(FoundationNetworking)
+    @Test func aCancelledWriteWhoseRequestFinishesLaterMovesItsCustomerAgain() async throws {
+      let api = FakeAPI { request in
+        guard request.method == "GET" else {
+          var reply = Reply.json(Fixture.planChange())
+          reply.delay = 0.5
+          return reply
+        }
+        return .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+      }
+      let server = try api.server()
+      let written = try server.customer("a")
+      let write = Task { try await written.cancel() }
+      while api.count == 0 { try await Task.sleep(nanoseconds: 1_000_000) }
+      write.cancel()
+      _ = await write.result
+      let settled = await server.core.state.generation(of: "a").generation
+      _ = try await written.check("sso")
+      for _ in 0..<300 where await server.core.state.generation(of: "a").generation == settled {
+        try await Task.sleep(nanoseconds: 10_000_000)
+      }
+      _ = try await written.check("sso")
+      #expect(api.requests.get.filter { $0.method == "GET" }.count == 2)
+    }
+  #endif
+
+  @Test func cancellingAsAnswersArriveNeverDeadlocks() async throws {
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let server = try api.server(cache: nil)
+    let customer = try server.customer("u")
+    for round in 0..<400 {
+      let call = Task { try await customer.check("sso") }
+      for _ in 0..<(round % 4) { await Task.yield() }
+      call.cancel()
+      _ = await call.result
+    }
+  }
+
+  @Test(arguments: [408, 429, 500, 502, 503, 504])
+  func retriesTransientStatuses(status: Int) async throws {
+    let api = FakeAPI(replies: [.error(status, code: "unavailable"), .json(Fixture.check())])
+    let check = try await api.run { try await api.server().customer("u").check("sso") }
+    #expect(check.entitled)
+    #expect(api.count == 2)
+    #expect(api.sleeps.get == [0.5])
+  }
+
+  @Test(arguments: [400, 401, 403, 404, 409, 422])
+  func neverRetriesOtherStatuses(status: Int) async throws {
+    let api = FakeAPI(replies: [.error(status, code: "x"), .json(Fixture.check())])
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await api.server().customer("u").check("sso") }
+    }
+    #expect(api.count == 1)
+  }
+
+  @Test func retriesConnectionFailuresWithBackoffThenFails() async throws {
+    let api = FakeAPI { _ in .failure(.networkConnectionLost) }
+    do {
+      _ = try await api.run {
+        try await api.server { $0.maxRetries = 3 }.customer("u").cancelUsage(id: "u_1")
+      }
+      Issue.record("Expected an error")
+    } catch EntitlerError.connection(let error) {
+      #expect(error.idempotencyKey != nil)
+      #expect((error.underlyingError as? URLError)?.code == .networkConnectionLost)
+    }
+    #expect(api.count == 4)
+    #expect(api.sleeps.get == [0.5, 1, 2])
+    let keys = Set(api.requests.get.map { $0.header("Idempotency-Key") })
+    #expect(keys.count == 1)
+  }
+
+  @Test func backoffIsCappedAtEightSeconds() async throws {
+    let api = FakeAPI { _ in .error(503, code: "unavailable") }
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await api.server { $0.maxRetries = 6 }.customer("u").billing() }
+    }
+    #expect(api.sleeps.get == [0.5, 1, 2, 4, 8, 8])
+  }
+
+  @Test func backoffNeverOverflowsForManyRetries() async throws {
+    let api = FakeAPI { _ in .error(503, code: "unavailable") }
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await api.server { $0.maxRetries = 64 }.customer("u").billing() }
+    }
+    #expect(api.count == 65)
+    #expect(api.sleeps.get.count == 64)
+    #expect(api.sleeps.get.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 8 })
+    #expect(api.sleeps.get.suffix(50).allSatisfy { $0 == 8 })
+  }
+
+  @Test func backoffIsRandomWithinBounds() async throws {
+    let api = FakeAPI(replies: [.error(500, code: "internal"), .json(Fixture.check())])
+    let picked = Box<[ClosedRange<Double>]>([])
+    var hooks = api.hooks
+    hooks.random = { range in
+      picked.with { $0.append(range) }
+      return range.lowerBound
+    }
+    _ = try await Hooks.$current.withValue(hooks) {
+      try await api.server().customer("u").check("sso")
+    }
+    #expect(picked.get == [0...0.5])
+  }
+
+  @Test func retryAfterSecondsAndDatesAreHonoured() async throws {
+    let api = FakeAPI(replies: [
+      .error(429, code: "rate_limited", headers: ["Retry-After": "3"]),
+      .error(503, code: "unavailable", headers: ["Retry-After": "Thu, 15 Jan 2027 08:00:05 GMT"]),
+      .json(Fixture.check()),
+    ])
+    api.clock.with { $0 = try! #require(parseInstant("2027-01-15T07:59:58Z")) }
+    _ = try await api.run { try await api.server().customer("u").check("sso") }
+    #expect(api.sleeps.get == [3, 4])
+  }
+
+  @Test func retryAfterBeyondTheMaximumFailsAtOnce() async throws {
+    let api = FakeAPI(replies: [.error(503, code: "unavailable", headers: ["Retry-After": "60"])])
+    do {
+      _ = try await api.run { try await api.server().customer("u").billing() }
+      Issue.record("Expected an error")
+    } catch EntitlerError.api(let error) {
+      #expect(error.retryAfter == 60)
+    }
+    #expect(api.count == 1)
+    #expect(api.sleeps.get.isEmpty)
+  }
+
+  @Test func retryAfterParsing() {
+    let now = Date(timeIntervalSince1970: 0)
+    #expect(retryAfterSeconds("12", now: now) == 12)
+    #expect(retryAfterSeconds("soon", now: now) == nil)
+    #expect(retryAfterSeconds("Thu, 01 Jan 1970 00:00:10 GMT", now: now) == 10)
+  }
+
+  @Test func timeoutsAreRetriedThenThrown() async throws {
+    let api = FakeAPI { _ in .hanging }
+    do {
+      _ = try await api.run {
+        try await api.server { $0.maxRetries = 1 }.customer("u").recordUsage(
+          of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k", timeout: 0.5)
+      }
+      Issue.record("Expected an error")
+    } catch EntitlerError.timeout(let error) {
+      #expect(error.timeout == 0.5)
+      #expect(error.idempotencyKey != nil)
+    }
+    #expect(api.count == 2)
+  }
+
+  @Test func idleTimeoutsFromURLSessionAreTimeouts() async throws {
+    let api = FakeAPI { _ in .failure(.timedOut) }
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await api.server { $0.maxRetries = 0 }.customer("u").billing() }
+    }
+  }
+
+  @Test func cancellationEndsARetryWait() async throws {
+    let api = FakeAPI { _ in .error(503, code: "unavailable") }
+    var hooks = api.hooks
+    hooks.sleep = { _ in try await Task.sleep(nanoseconds: 10_000_000_000) }
+    let task = Task {
+      try await Hooks.$current.withValue(hooks) { try await api.server().customer("u").billing() }
+    }
+    try await Task.sleep(nanoseconds: 100_000_000)
+    task.cancel()
+    await #expect(throws: CancellationError.self) { try await task.value }
+  }
+
+  @Test func cancelledRequestsSurfaceCancellationError() async throws {
+    let api = FakeAPI { _ in .failure(.cancelled) }
+    let task = Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      return try await api.run { try await api.server().customer("u").billing() }
+    }
+    await #expect(throws: CancellationError.self) { try await task.value }
+  }
+
+  @Test func callersIdempotencyKeyIsSentAndValidated() async throws {
+    let api = FakeAPI { _ in .json(Fixture.usage()) }
+    let customer = try api.server().customer("u")
+    _ = try await api.run {
+      try await customer.recordUsage(
+        of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "job-42")
+    }
+    #expect(api.last.header("Idempotency-Key") == "job-42")
+    for bad in ["", String(repeating: "a", count: 201), "tab\there", "é"] {
+      await #expect(
+        throws: ArgumentError(
+          message: "Pass idempotencyKey as 1 to 200 printable ASCII characters.")
+      ) {
+        try await customer.recordUsage(
+          of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: bad)
+      }
+    }
+    #expect(api.count == 1)
+  }
+}
+
+@Suite struct CacheTests {
+  @Test func freshAnswersNeedNoRequest() async throws {
+    let api = FakeAPI { _ in
+      .json(Fixture.check(), headers: ["Cache-Control": "private, max-age=30", "ETag": "\"e1\""])
+    }
+    let customer = try api.server().customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      _ = try await customer.check("sso")
+      #expect(api.count == 1)
+      api.advance(31)
+      _ = try await customer.check("sso")
+      #expect(api.count == 2)
+      #expect(api.last.header("If-None-Match") == "\"e1\"")
+    }
+  }
+
+  @Test func writesForceRevalidation() async throws {
+    let api = FakeAPI { request in
+      request.method == "GET"
+        ? .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e1\""])
+        : .json(Fixture.usage())
+    }
+    let server = try api.server()
+    try await api.run {
+      _ = try await server.customer("u").check("sso")
+      _ = try await server.customer("other").cancelUsage(id: "x")
+      _ = try await server.customer("u").check("sso")
+      #expect(api.count == 2)
+      api.advance(1)
+      _ = try await server.customer("u").recordUsage(
+        of: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
+      _ = try await server.customer("u").check("sso")
+      #expect(api.count == 4)
+      #expect(api.last.header("If-None-Match") == "\"e1\"")
+    }
+  }
+
+  @Test func notModifiedAnswersTheKeptBody() async throws {
+    let api = FakeAPI(replies: [
+      .json(
+        Fixture.entitlements, headers: ["Cache-Control": "private, no-cache", "ETag": "\"e1\""]),
+      Reply(status: 304, headers: ["ETag": "\"e1\"", "Cache-Control": "max-age=60"]),
+    ])
+    let customer = try api.server().customer("u")
+    try await api.run {
+      let first = try await customer.entitlements()
+      let second = try await customer.entitlements()
+      #expect(first == second)
+      #expect(api.requests.get[1].header("If-None-Match") == "\"e1\"")
+      _ = try await customer.entitlements()
+      #expect(api.count == 2)
+    }
+  }
+
+  @Test func notModifiedWithoutKeptAnswerIsAnHTTPError() async throws {
+    let api = FakeAPI(replies: [Reply(status: 304)])
+    do {
+      _ = try await api.run { try await api.server(cache: nil).customer("u").check("sso") }
+      Issue.record("Expected an error")
+    } catch EntitlerError.api(let error) {
+      #expect(error.status == 304)
+      #expect(error.code == .httpError)
+      #expect(error.message == "Entitler answered with HTTP 304.")
+    }
+  }
+
+  @Test func noStoreIsNeverKept() async throws {
+    let api = FakeAPI { _ in
+      .json(Fixture.check(), headers: ["Cache-Control": "no-store, max-age=60", "ETag": "\"e\""])
+    }
+    let customer = try api.server().customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      _ = try await customer.check("sso")
+    }
+    #expect(api.count == 2)
+    #expect(api.last.header("If-None-Match") == nil)
+  }
+
+  @Test func cachingCanBeTurnedOff() async throws {
+    let api = FakeAPI { _ in .json(Fixture.check(), headers: ["Cache-Control": "max-age=60"]) }
+    let customer = try api.server(cache: nil).customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      _ = try await customer.check("sso")
+    }
+    #expect(api.count == 2)
+  }
+
+  @Test func keysSeparatePrincipalAsOfAndVisitor() async throws {
+    let store = RecordingStore()
+    let pricing =
+      #"{\#(Fixture.context),"customer":"u","defaultPlan":null,"products":[],"plans":[]}"#
+    let api = FakeAPI { request in
+      .json(
+        request.path.hasSuffix("pricing") ? pricing : Fixture.check(),
+        headers: ["Cache-Control": "max-age=60"])
+    }
+    try await api.run {
+      _ = try await EntitlerServer(key: "a", cache: store, options: api.options()).customer(
+        "u"
+      ).check("sso")
+      _ = try await EntitlerServer(key: "b", cache: store, options: api.options()).customer(
+        "u"
+      ).check("sso")
+      _ = try await EntitlerServer(key: "a", cache: store, options: api.options())
+        .customer("u").check("sso", asOf: Date(timeIntervalSince1970: 0))
+      let server = try EntitlerServer(key: "a", cache: store, options: api.options())
+      _ = try await server.customer("u").pricing(visitor: "aaaaaaaaaaaaaaaa")
+      _ = try await server.customer("u").pricing(visitor: "bbbbbbbbbbbbbbbb")
+      _ = try await server.customer("u").check("sso")
+    }
+    #expect(api.count == 5)
+    #expect(store.keys.count == 5)
+    #expect(store.keys.allSatisfy { $0.count == 64 && $0.allSatisfy(\.isHexDigit) })
+  }
+
+  @Test func aFailingProviderNeverAnswersEntriesKeptUnderAnEarlierToken() async throws {
+    let tokens = Box(0)
+    let api = FakeAPI { _ in
+      .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+    }
+    struct Offline: Error {}
+    let errors = Box<[any Error]>([])
+    let client = try EntitlerClient(
+      tokenProvider: {
+        let n = tokens.with {
+          $0 += 1
+          return $0
+        }
+        if n >= 3 { throw Offline() }
+        return makeJWT([
+          "sub": "user_1", "iat": 1_800_000_000, "exp": 1_800_000_200 + n * 200, "n": n,
+        ])
+      }, options: api.options { $0.onError = { error in errors.with { $0.append(error) } } })
+    try await api.run {
+      _ = try await client.me.check("sso")
+      api.advance(350)
+      _ = try await client.me.check("sso")
+      #expect(api.count == 2)
+      api.advance(200)
+      do {
+        _ = try await client.me.check("sso")
+        Issue.record("Expected a token error")
+      } catch EntitlerError.token {}
+      #expect(await client.me.isEntitled(to: "sso", default: false) == false)
+    }
+    #expect(api.count == 2)
+    #expect(errors.get.count == 1)
+  }
+
+  @Test func memoryStoreEvictsTheLeastRecentlyUsed() async {
+    let store = MemoryCacheStore(capacity: 2)
+    let entry = CacheEntry(body: "{}", etag: nil, cacheControl: nil, age: nil, receivedAt: Date())
+    await store.setEntry(entry, forKey: "a", timeToLive: 1)
+    await store.setEntry(entry, forKey: "b", timeToLive: 1)
+    _ = await store.entry(forKey: "a")
+    await store.setEntry(entry, forKey: "c", timeToLive: 1)
+    #expect(await store.entry(forKey: "a") != nil)
+    #expect(await store.entry(forKey: "b") == nil)
+    #expect(await store.entry(forKey: "c") != nil)
+  }
+
+  @Test func concurrentReadsAreSafe() async throws {
+    let api = FakeAPI { _ in
+      .json(Fixture.check(), headers: ["Cache-Control": "max-age=60", "ETag": "\"e\""])
+    }
+    let customer = try api.server().customer("u")
+    try await api.run {
+      try await withThrowingTaskGroup(of: Bool.self) { group in
+        for index in 0..<50 {
+          group.addTask { try await customer.check(index % 2 == 0 ? "sso" : "export_pdf").entitled }
+        }
+        for try await entitled in group { #expect(entitled) }
+      }
+    }
+    #expect(api.count <= 50)
+  }
+
+  @Test func staleAnswersStandInWhenUnreachable() async throws {
+    let errors = Box<[any Error]>([])
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .error(503, code: "unavailable"),
+      .error(503, code: "unavailable"), .error(503, code: "unavailable"),
+    ])
+    let customer = try api.server { options in
+      options.onError = { error in errors.with { $0.append(error) } }
+    }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      let stale = try await customer.check("sso")
+      #expect(stale.stale)
+      #expect(stale.entitled)
+    }
+    #expect(errors.get.count == 1)
+  }
+
+  @Test func staleAnswersExpireAfterStaleFor() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+    ])
+    let customer = try api.server {
+      $0.staleFor = 60
+      $0.maxRetries = 0
+    }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      api.advance(61)
+      await #expect(throws: EntitlerError.self) { try await customer.check("sso") }
+    }
+  }
+
+  @Test(arguments: [403, 404, 409])
+  func aProbeEndingInAnotherErrorEndsTheOutage(status: Int) async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+      .error(status, code: "x"), .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+      api.advance(31)
+      await #expect(throws: EntitlerError.self) { try await customer.check("sso") }
+      let fresh = try await customer.check("sso")
+      #expect(!fresh.stale)
+    }
+    #expect(api.count == 4)
+  }
+
+  @Test func aCancelledProbeEndsTheOutage() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+      .error(503, code: "unavailable"), .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let customer = try api.server { $0.maxRetries = 1 }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+    }
+    api.answer { _ in .failure(.notConnectedToInternet) }
+    #expect(try await api.run { try await customer.check("sso") }.stale)
+    let afterOutage = api.count
+    api.advance(31)
+    var waiting = api.hooks
+    let retrying = Box(false)
+    waiting.sleep = { _ in
+      retrying.with { $0 = true }
+      try await Task.sleep(nanoseconds: 10_000_000_000)
+    }
+    api.answer { _ in .error(503, code: "unavailable") }
+    let probe = Task {
+      try await Hooks.$current.withValue(waiting) { try await customer.check("sso") }
+    }
+    while !retrying.get { try await Task.sleep(nanoseconds: 1_000_000) }
+    probe.cancel()
+    _ = await probe.result
+    #expect(api.count == afterOutage + 1)
+    api.answer { _ in .json(Fixture.check(), headers: ["ETag": "\"f\""]) }
+    let fresh = try await api.run { try await customer.check("sso") }
+    #expect(!fresh.stale)
+    #expect(api.count == afterOutage + 2)
+  }
+
+  @Test func anOutageNeverOutlastsStaleFor() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]),
+      .error(503, code: "unavailable", headers: ["Retry-After": "999999999"]),
+      .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let server = try api.server {
+      $0.maxRetries = 0
+      $0.staleFor = 100
+    }
+    let customer = try server.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+    }
+    #expect(
+      await server.core.state.outageAnswer(at: api.clock.get.addingTimeInterval(99)) == .serveKept)
+    #expect(
+      await server.core.state.outageAnswer(at: api.clock.get.addingTimeInterval(101)) == .probe)
+    await server.core.state.endProbe()
+    api.advance(101)
+    let recovered = try await api.run { try await customer.check("sso", revalidate: true) }
+    #expect(!recovered.stale)
+    #expect(api.count == 3)
+  }
+
+  @Test func anySuccessfulAnswerEndsTheOutage() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .failure(.notConnectedToInternet),
+      .json(Fixture.planChange()), .json(Fixture.check(), headers: ["ETag": "\"f\""]),
+    ])
+    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      #expect(try await customer.check("sso").stale)
+      _ = try await customer.cancel()
+      let fresh = try await customer.check("sso")
+      #expect(!fresh.stale)
+    }
+    #expect(api.count == 4)
+  }
+
+  @Test func otherFailuresAreNotHiddenByStaleAnswers() async throws {
+    let api = FakeAPI(replies: [
+      .json(Fixture.check(), headers: ["ETag": "\"e\""]), .error(403, code: "scope_required"),
+    ])
+    let customer = try api.server().customer("u")
+    try await api.run {
+      _ = try await customer.check("sso")
+      await #expect(throws: EntitlerError.self) { try await customer.check("sso") }
+    }
+  }
+
+  @Test func eachStaleAnswerTypeIsMarked() async throws {
+    let replies: [String] = [
+      Fixture.entitlements,
+      #"{"customer":"u","asOf":"2026-10-09T01:47:13Z","held":[],"options":[],\#(Fixture.context)}"#,
+      #"{\#(Fixture.context),"customer":"u","defaultPlan":null,"products":[],"plans":[]}"#,
+      Fixture.meteredCheck,
+    ]
+    let api = FakeAPI { _ in .failure(.notConnectedToInternet) }
+    let customer = try api.server { $0.maxRetries = 0 }.customer("u")
+    for (index, body) in replies.enumerated() {
+      api.answer { _ in .json(body, headers: ["ETag": "\"e\""]) }
+      try await api.run {
+        switch index {
+        case 0: _ = try await customer.entitlements()
+        case 1: _ = try await customer.plans()
+        case 2: _ = try await customer.pricing()
+        default: _ = try await customer.check(Feature<Metered>("ai_credits"))
+        }
+      }
+    }
+    api.answer { _ in .failure(.notConnectedToInternet) }
+    let stale = try await api.run {
+      [
+        try await customer.entitlements().stale, try await customer.plans().stale,
+        try await customer.pricing().stale,
+        try await customer.check(Feature<Metered>("ai_credits")).stale,
+      ]
+    }
+    #expect(stale == [true, true, true, true])
+  }
+
+  @Test func isEntitledAnswersDefaultsAndReportsErrors() async throws {
+    let errors = Box(0)
+    let api = FakeAPI { _ in .error(404, code: "feature_not_found") }
+    let customer = try api.server { $0.onError = { _ in errors.with { $0 += 1 } } }.customer("u")
+    await api.run {
+      #expect(await customer.isEntitled(to: "missing", default: true))
+      #expect(await !customer.isEntitled(to: Feature<OnOff>("missing"), default: false))
+    }
+    #expect(errors.get == 2)
+    api.answer { _ in .json(Fixture.check(entitled: false, value: "0")) }
+    await api.run { #expect(await !customer.isEntitled(to: "sso", default: true)) }
+  }
+
+  @Test func isEntitledAnswersDefaultOnCancellationWithoutOnError() async throws {
+    let errors = Box(0)
+    let api = FakeAPI { _ in .hanging }
+    let customer = try api.server { $0.onError = { _ in errors.with { $0 += 1 } } }.customer("u")
+    let task = Task { await api.run { await customer.isEntitled(to: "sso", default: true) } }
+    try await Task.sleep(nanoseconds: 50_000_000)
+    task.cancel()
+    #expect(await task.value)
+    #expect(errors.get == 0)
+  }
+}
+
+@Suite struct TokenTests {
+  @Test func providerIsAskedOnFirstUseAndBeforeExpiry() async throws {
+    let calls = Box(0)
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let client = try EntitlerClient(
+      tokenProvider: {
+        let n = calls.with {
+          $0 += 1
+          return $0
+        }
+        return makeJWT(["sub": "user_1", "exp": 1_800_000_100, "n": n])
+      }, cache: nil, options: api.options())
+    try await api.run {
+      #expect(calls.get == 0)
+      _ = try await client.me.check("sso")
+      _ = try await client.me.check("sso")
+      #expect(calls.get == 1)
+      api.advance(51)
+      _ = try await client.me.check("sso")
+      #expect(calls.get == 2)
+    }
+    #expect(api.last.header("Authorization")?.hasPrefix("Bearer ey") == true)
+    #expect(api.last.path == "/customers/me/entitlements/sso")
+    #expect(api.last.header("Entitler-Visitor") == client.visitor)
+  }
+
+  @Test func unauthorisedRefreshesOnceAndRetries() async throws {
+    let calls = Box(0)
+    let api = FakeAPI(replies: [.error(401, code: "unauthorised"), .json(Fixture.check())])
+    let client = try EntitlerClient(
+      tokenProvider: {
+        calls.with {
+          $0 += 1
+          return makeJWT(["sub": "u", "n": $0])
+        }
+      },
+      options: api.options())
+    _ = try await api.run { try await client.me.check("sso") }
+    #expect(calls.get == 2)
+    #expect(api.count == 2)
+    #expect(
+      api.requests.get[0].header("Authorization") != api.requests.get[1].header("Authorization"))
+  }
+
+  @Test func secondUnauthorisedFails() async throws {
+    let api = FakeAPI { _ in .error(401, code: "unauthorised") }
+    let client = try EntitlerClient(
+      tokenProvider: { makeJWT(["sub": "u", "r": Int.random(in: 0...1_000_000)]) },
+      options: api.options())
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await client.me.check("sso") }
+    }
+    #expect(api.count == 2)
+  }
+
+  @Test func fixedTokensAreNotRefreshed() async throws {
+    let api = FakeAPI { _ in .error(401, code: "unauthorised") }
+    let client = try EntitlerClient(token: "fixed", options: api.options())
+    await #expect(throws: EntitlerError.self) {
+      try await api.run { try await client.me.check("sso") }
+    }
+    #expect(api.count == 1)
+    #expect(api.last.header("Authorization") == "Bearer fixed")
+  }
+
+  @Test func credentialNotAllowedIsNeitherRetriedNorRefreshed() async throws {
+    let calls = Box(0)
+    let api = FakeAPI { _ in .error(403, code: "credential_not_allowed") }
+    let client = try EntitlerClient(
+      tokenProvider: {
+        calls.with { $0 += 1 }
+        return makeJWT(["sub": "u"])
+      }, options: api.options())
+    do {
+      _ = try await api.run { try await client.me.check("sso") }
+    } catch EntitlerError.api(let error) {
+      #expect(error.code == .credentialNotAllowed)
+    }
+    #expect(calls.get == 1)
+    #expect(api.count == 1)
+  }
+
+  @Test func concurrentRequestsShareOneRefresh() async throws {
+    let calls = Box(0)
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let client = try EntitlerClient(
+      tokenProvider: {
+        calls.with { $0 += 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        return makeJWT(["sub": "u"])
+      }, cache: nil, options: api.options())
+    try await api.run {
+      try await withThrowingTaskGroup(of: Void.self) { group in
+        for _ in 0..<10 { group.addTask { _ = try await client.me.check("sso") } }
+        try await group.waitForAll()
+      }
+    }
+    #expect(calls.get == 1)
+  }
+
+  @Test func failingAndUnusableProvidersThrowTokenErrors() async throws {
+    struct Boom: Error {}
+    let api = FakeAPI { _ in .json(Fixture.check()) }
+    let failing = try EntitlerClient(tokenProvider: { throw Boom() }, options: api.options())
+    do {
+      _ = try await api.run { try await failing.me.check("sso") }
+      Issue.record("Expected an error")
+    } catch EntitlerError.token(let error) {
+      #expect(error.underlyingError is Boom)
+      #expect(error.message.hasPrefix("The token provider failed"))
+    }
+    let blank = try EntitlerClient(
+      key: "ent_pk_1", identityTokenProvider: { "  " }, options: api.options())
+    do {
+      _ = try await api.run { try await blank.me.check("sso") }
+    } catch EntitlerError.token(let error) {
+      #expect(error.message == "Provide the identity token your sign-in provider issued.")
+    }
+    let unreadable = try EntitlerClient(tokenProvider: { "not-a-jwt" }, options: api.options())
+    do {
+      _ = try await api.run { try await unreadable.me.check("sso") }
+    } catch EntitlerError.token(let error) {
+      #expect(!error.message.contains("not-a-jwt"))
+    }
+    #expect(api.count == 0)
+  }
+
+  @Test func identityClientsSendKeyAndToken() async throws {
+    let api = FakeAPI { request in
+      request.path == "/keys/self"
+        ? .json(
+          #"{"id":"k","name":"Key","kind":"publishable","orgId":"o","projectId":"p","environmentId":"e","allowedOrigins":[],"createdAt":"2026-10-01T00:00:00Z","revokedAt":null,"scopes":["customers:register","entitlements:read"],"registration":false}"#
+        )
+        : request.path == "/customers/snapshot-keys"
+          ? .json(#"{"keys":[]}"#)
+          : .json(
+            #"{"id":"c","externalId":"google:1","environmentId":"e","createdAt":"2026-10-09T01:47:13Z","created":true}"#,
+            status: 201)
+    }
+    let token = makeJWT(["iss": "https://accounts.google.com", "sub": "1"])
+    let client = try EntitlerClient(
+      key: "ent_pk_live", identityToken: token, options: api.options())
+    try await api.run {
+      let registered = try await client.register()
+      #expect(registered.created)
+      #expect(registered.externalID == "google:1")
+      #expect(api.last.method == "PUT")
+      #expect(api.last.path == "/customers/me")
+      #expect(api.last.body == nil || api.last.body?.isEmpty == true)
+      #expect(api.last.header("Authorization") == "Bearer ent_pk_live")
+      #expect(api.last.header("Entitler-Identity-Token") == token)
+      let scopes = try await client.scopes()
+      #expect(scopes.scopes == [.entitlementsRead, .customersRegister])
+      #expect(scopes.registration == false)
+      _ = try await client.snapshotKeys()
+      #expect(api.last.header("Entitler-Identity-Token") == nil)
+    }
+  }
+
+  @Test func signedInIdComesFromTheLatestAnswer() async throws {
+    let api = FakeAPI { _ in .json(Fixture.check(customer: "user_9")) }
+    let client = try EntitlerClient(token: "t", options: api.options())
+    #expect(await client.me.id == nil)
+    _ = try await api.run { try await client.me.check("sso") }
+    #expect(await client.me.id == "user_9")
+    #expect(try EntitlerServer(key: "k").customer("x").id == "x")
+  }
+}
+
+final class RecordingStore: CacheStore {
+  let inner = MemoryCacheStore(capacity: 100)
+  let written = Box<Set<String>>([])
+  var keys: Set<String> { written.get }
+  func entry(forKey key: String) async -> CacheEntry? { await inner.entry(forKey: key) }
+  func setEntry(_ entry: CacheEntry, forKey key: String, timeToLive: TimeInterval) async {
+    written.with { _ = $0.insert(key) }
+    await inner.setEntry(entry, forKey: key, timeToLive: timeToLive)
+  }
+}
+
+func makeJWT(_ claims: [String: Any]) -> String {
+  var claims = claims
+  if claims["exp"] == nil { claims["exp"] = 4_000_000_000 }
+  let header = Base64URL.encode(Data(#"{"alg":"none"}"#.utf8))
+  let payload = Base64URL.encode(try! JSONSerialization.data(withJSONObject: claims))
+  return "\(header).\(payload).sig"
+}
