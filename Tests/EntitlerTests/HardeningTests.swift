@@ -865,20 +865,35 @@ import Testing
     #expect(api.last.header("If-None-Match") == "\"e\"")
   }
 
-  @Test func anAnswerWhoseCustomerWasForgottenInFlightIsRevalidated() async throws {
+  actor RecordingStore: CacheStore {
+    let inner = MemoryCacheStore(capacity: 10)
+    private(set) var stored: [CacheEntry] = []
+
+    func entry(forKey key: String) async throws -> CacheEntry? {
+      await inner.entry(forKey: key)
+    }
+
+    func setEntry(_ entry: CacheEntry, forKey key: String, timeToLive: TimeInterval) async throws {
+      stored.append(entry)
+      await inner.setEntry(entry, forKey: key, timeToLive: timeToLive)
+    }
+  }
+
+  @Test func anAnswerWhoseCustomerWasWrittenAndForgottenInFlightIsRevalidated() async throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
     let state = Box<ClientState?>(nil)
     let gets = Box(0)
+    let store = RecordingStore()
     let server = try EntitlerServer(
-      key: "ent_sk_1", cache: MemoryCacheStore(capacity: 10),
-      options: EntitlerOptions(maxRetries: 0),
+      key: "ent_sk_1", cache: store, options: EntitlerOptions(maxRetries: 0),
       exchange: { request in
         let first = gets.with { count -> Bool in
           count += 1
           return count == 1
         }
         if first, let state = state.get {
-          await state.bump("a", at: Date())
-          for index in 0..<10_001 { await state.bump("o\(index)", at: Date()) }
+          await state.bump("a", at: now)
+          for index in 0..<10_001 { await state.bump("o\(index)", at: now) }
         }
         let http = HTTPURLResponse(
           url: request.url!, statusCode: 200, httpVersion: nil,
@@ -887,9 +902,16 @@ import Testing
       })
     state.with { $0 = server.core.state }
     let customer = try server.customer("a")
-    _ = try await customer.check("sso")
-    #expect(await server.core.state.generation(of: "a").generation == 0)
-    _ = try await customer.check("sso")
+    var hooks = Hooks()
+    hooks.now = { now }
+    try await Hooks.$current.withValue(hooks) {
+      _ = try await customer.check("sso")
+      #expect(await server.core.state.generation(of: "a").generation == 0)
+      let kept = try #require(await store.stored.first)
+      #expect(kept.cacheControl == "max-age=300")
+      #expect(kept.receivedAt == now)
+      _ = try await customer.check("sso")
+    }
     #expect(gets.get == 2)
   }
 

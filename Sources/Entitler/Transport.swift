@@ -149,6 +149,10 @@ actor ClientState {
     return (kept.generation, kept.at)
   }
 
+  func startRead(of customer: String?, at now: Date) -> (mark: ReadMark, at: Date) {
+    (readMark(of: customer), stamp(now))
+  }
+
   func readMark(of customer: String?) -> ReadMark {
     ReadMark(generation: generation(of: customer).generation, forgets: forgets)
   }
@@ -313,7 +317,7 @@ final class Core: Sendable, CustomReflectable {
     let token = request.authenticated ? try await currentToken() : nil
     let key = cacheKey(request, token: token)
     let kept = await entry(key, in: cache)
-    let started = await state.readMark(of: request.customer)
+    let started = await state.startRead(of: request.customer, at: hooks.now())
     let written = await state.generation(of: request.customer).at
     if !request.revalidate, let kept, kept.isFresh(at: hooks.now()),
       written.map({ $0 < kept.receivedAt }) ?? true
@@ -327,7 +331,8 @@ final class Core: Sendable, CustomReflectable {
     }
     do {
       let answer: Answer = try await askAPI(
-        request, token: token, key: key, kept: kept, started: started, cache: cache)
+        request, token: token, key: key, kept: kept, started: started.mark,
+        startedAt: started.at, cache: cache)
       if outage == .probe { await state.endProbe() }
       return answer
     } catch {
@@ -338,7 +343,7 @@ final class Core: Sendable, CustomReflectable {
 
   private func askAPI<Answer: Decodable>(
     _ request: Request, token: String?, key: String, kept: CacheEntry?, started: ReadMark,
-    cache: any CacheStore
+    startedAt: Date, cache: any CacheStore
   ) async throws -> Answer {
     let hooks = Hooks.current
     do {
@@ -366,9 +371,7 @@ final class Core: Sendable, CustomReflectable {
       let answer: Answer = try decode(entry.map(Response.init) ?? response)
       await state.reachable()
       if var entry {
-        if await state.readMark(of: request.customer) != started {
-          entry.cacheControl = (entry.cacheControl.map { $0 + ", " } ?? "") + "no-cache"
-        }
+        if await state.readMark(of: request.customer) != started { entry.receivedAt = startedAt }
         await store(entry, key: key, in: cache)
       }
       return answer
