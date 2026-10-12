@@ -151,8 +151,7 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
       request.idempotencyKey = batchKey(chunk.map(\.event), register: register) {
         [$0.customer, $0.feature, $0.amount, $0.occurredAt, $0.idempotencyKey]
       }
-      let written = core.cache != nil ? Set(chunk.map(\.event.customer)) : []
-      await core.bump(written)
+      request.batchCustomers = Set(chunk.map(\.event.customer))
       do {
         let answer: Answer = try await core.call(request)
         var answered = Set<Int>()
@@ -185,11 +184,7 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
             index: sent.index, outcome: .error, id: nil, late: false, error: failure,
             idempotencyKey: sent.event.idempotencyKey, replayed: false)
         }
-      } catch {
-        await core.bump(written)
-        throw error
       }
-      await core.bump(written)
     }
     results.sort { $0.index < $1.index }
     return UsageBatchResult(

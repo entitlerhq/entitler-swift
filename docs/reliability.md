@@ -11,7 +11,7 @@ Cancelling the task cancels the request and any retry wait at once, and throws
 `CancellationError`. On Linux the call returns at once in the same way, but the request itself is
 left to end on its own, with its idle timeout still applying: in swift-corelibs-foundation,
 cancelling a request as its answer arrives can deadlock or crash the process, so the SDK never
-cancels one there.
+cancels one there. When such a write ends, the customer's cached answers are revalidated again.
 
 ## Retries
 

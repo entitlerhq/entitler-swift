@@ -8,6 +8,32 @@ import Testing
 #endif
 
 @Suite struct RetryTests {
+  #if canImport(FoundationNetworking)
+    @Test func aCancelledWriteWhoseRequestFinishesLaterMovesItsCustomerAgain() async throws {
+      let api = FakeAPI { request in
+        guard request.method == "GET" else {
+          var reply = Reply.json(Fixture.planChange())
+          reply.delay = 0.5
+          return reply
+        }
+        return .json(Fixture.check(), headers: ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+      }
+      let server = try api.server()
+      let written = try server.customer("a")
+      let write = Task { try await written.cancel() }
+      while api.count == 0 { try await Task.sleep(nanoseconds: 1_000_000) }
+      write.cancel()
+      _ = await write.result
+      let settled = await server.core.state.generation(of: "a").generation
+      _ = try await written.check("sso")
+      for _ in 0..<300 where await server.core.state.generation(of: "a").generation == settled {
+        try await Task.sleep(nanoseconds: 10_000_000)
+      }
+      _ = try await written.check("sso")
+      #expect(api.requests.get.filter { $0.method == "GET" }.count == 2)
+    }
+  #endif
+
   @Test func cancellingAsAnswersArriveNeverDeadlocks() async throws {
     let api = FakeAPI { _ in .json(Fixture.check()) }
     let server = try api.server(cache: nil)

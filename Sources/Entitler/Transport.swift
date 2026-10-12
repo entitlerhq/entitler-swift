@@ -69,6 +69,7 @@ struct Request: Sendable {
   var asOf: Date?
   var revalidate = false
   var changesAnswers = true
+  var batchCustomers: Set<String> = []
   var authenticated = true
 
   init(_ method: String, _ segments: [String], body: (any Encodable)? = nil) throws {
@@ -193,7 +194,10 @@ final class RedirectRefuser: NSObject, URLSessionTaskDelegate, Sendable {
 
 extension URLSession {
   #if canImport(FoundationNetworking)
-    func answer(to request: URLRequest) async throws -> (Data, URLResponse) {
+    func answer(
+      to request: URLRequest,
+      whenAbandonedFinishes abandonedFinished: @escaping @Sendable () -> Void
+    ) async throws -> (Data, URLResponse) {
       typealias Waiting = CheckedContinuation<(Data, URLResponse), any Error>
       let pending = LockedValue<(waiting: Waiting?, cancelled: Bool)>((nil, false))
       return try await withTaskCancellationHandler {
@@ -204,7 +208,9 @@ extension URLSession {
           }
           guard !cancelled else { return continuation.resume(throwing: CancellationError()) }
           let task = dataTask(with: request) { body, response, error in
-            guard let waiting = pending.update({ $0.waiting.take() }) else { return }
+            guard let waiting = pending.update({ $0.waiting.take() }) else {
+              return abandonedFinished()
+            }
             if let body, let response {
               waiting.resume(returning: (body, response))
             } else {
@@ -224,7 +230,10 @@ extension URLSession {
       }
     }
   #else
-    func answer(to request: URLRequest) async throws -> (Data, URLResponse) {
+    func answer(
+      to request: URLRequest,
+      whenAbandonedFinishes abandonedFinished: @escaping @Sendable () -> Void
+    ) async throws -> (Data, URLResponse) {
       try await data(for: request, delegate: RedirectRefuser.shared)
     }
   #endif
@@ -480,27 +489,30 @@ final class Core: Sendable, CustomReflectable {
   func send(_ request: Request, token: String? = nil, ifNoneMatch etag: String? = nil) async throws
     -> Response
   {
-    let written =
-      request.method != "GET" && request.changesAnswers && cache != nil ? request.customer : nil
-    guard let written else { return try await sendSettling(request, token: token, etag: etag) }
-    await state.bump(written, at: Hooks.current.now())
+    let written: Set<String> =
+      request.method != "GET" && request.changesAnswers && cache != nil
+      ? request.customer.map { [$0] } ?? request.batchCustomers : []
+    guard !written.isEmpty else {
+      return try await sendSettling(request, token: token, etag: etag, written: [])
+    }
+    await bump(written)
     do {
-      let response = try await sendSettling(request, token: token, etag: etag)
-      await state.bump(written, at: Hooks.current.now())
+      let response = try await sendSettling(request, token: token, etag: etag, written: written)
+      await bump(written)
       return response
     } catch {
-      await state.bump(written, at: Hooks.current.now())
+      await bump(written)
       throw error
     }
   }
 
-  func bump(_ customers: Set<String>) async {
+  private func bump(_ customers: Set<String>) async {
     for customer in customers { await state.bump(customer, at: Hooks.current.now()) }
   }
 
-  private func sendSettling(_ request: Request, token: String?, etag: String?) async throws
-    -> Response
-  {
+  private func sendSettling(
+    _ request: Request, token: String?, etag: String?, written: Set<String>
+  ) async throws -> Response {
     var token = token
     if token == nil, request.authenticated { token = try await currentToken() }
     let hooks = Hooks.current
@@ -523,7 +535,7 @@ final class Core: Sendable, CustomReflectable {
       let failure: EntitlerError
       do {
         let (body, http) = try await attempt(
-          urlRequest, timeout: timeout, idempotencyKey: idempotencyKey)
+          urlRequest, timeout: timeout, idempotencyKey: idempotencyKey, written: written)
         if http.statusCode == 401, !refreshed, let sent = token,
           let fresh = try await refresh(replacing: sent), fresh != sent
         {
@@ -562,17 +574,22 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func attempt(_ request: URLRequest, timeout: TimeInterval, idempotencyKey: String?)
-    async throws -> (Data, HTTPURLResponse)
-  {
+  private func attempt(
+    _ request: URLRequest, timeout: TimeInterval, idempotencyKey: String?, written: Set<String>
+  ) async throws -> (Data, HTTPURLResponse) {
     let session = options.session
     let exchange = exchange
     let hooks = Hooks.current
+    let state = state
+    let abandonedFinished: @Sendable () -> Void = {
+      guard !written.isEmpty else { return }
+      Task { for customer in written { await state.bump(customer, at: hooks.now()) } }
+    }
     do {
       let answer = try await withThrowingTaskGroup(of: (Data, URLResponse)?.self) { group in
         group.addTask {
           if let exchange { return try await exchange(request) }
-          return try await session.answer(to: request)
+          return try await session.answer(to: request, whenAbandonedFinishes: abandonedFinished)
         }
         group.addTask {
           try await hooks.deadline(timeout)
