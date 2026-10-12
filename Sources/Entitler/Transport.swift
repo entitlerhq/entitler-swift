@@ -438,9 +438,27 @@ final class Core: Sendable, CustomReflectable {
   func send(_ request: Request, token: String? = nil, ifNoneMatch etag: String? = nil) async throws
     -> Response
   {
-    if request.method != "GET", request.changesAnswers, let customer = request.customer {
-      if cache != nil { await state.bump(customer, at: Hooks.current.now()) }
+    let written =
+      request.method != "GET" && request.changesAnswers && cache != nil ? request.customer : nil
+    guard let written else { return try await sendSettling(request, token: token, etag: etag) }
+    await state.bump(written, at: Hooks.current.now())
+    do {
+      let response = try await sendSettling(request, token: token, etag: etag)
+      await state.bump(written, at: Hooks.current.now())
+      return response
+    } catch {
+      await state.bump(written, at: Hooks.current.now())
+      throw error
     }
+  }
+
+  func bump(_ customers: Set<String>) async {
+    for customer in customers { await state.bump(customer, at: Hooks.current.now()) }
+  }
+
+  private func sendSettling(_ request: Request, token: String?, etag: String?) async throws
+    -> Response
+  {
     var token = token
     if token == nil, request.authenticated { token = try await currentToken() }
     let hooks = Hooks.current

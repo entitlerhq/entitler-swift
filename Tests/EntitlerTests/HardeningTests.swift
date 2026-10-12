@@ -1,3 +1,4 @@
+import EntitlerTesting
 import Foundation
 import Testing
 
@@ -939,6 +940,123 @@ import Testing
     #expect(second > first && second.timeIntervalSince(first) <= 0.000_001_5)
     #expect(third > second)
     #expect(await state.stamp(now.addingTimeInterval(1)) == now.addingTimeInterval(1))
+  }
+
+  enum WriteOutcome: CaseIterable, Sendable {
+    case succeeds, fails, cancelled
+  }
+
+  actor Gate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+      isOpen = true
+      for waiter in waiters { waiter.resume() }
+      waiters = []
+    }
+
+    func wait() async {
+      guard !isOpen else { return }
+      await withCheckedContinuation { waiters.append($0) }
+    }
+  }
+
+  @Test(arguments: WriteOutcome.allCases, [true, false])
+  func aReadDuringAWriteIsNeverFreshAfterItSettles(
+    _ outcome: WriteOutcome, answeredBeforeSettling: Bool
+  ) async throws {
+    let writeStarted = Gate()
+    let writeMaySettle = Gate()
+    let readStarted = Gate()
+    let readMayAnswer = Gate()
+    let gets = Box(0)
+    let server = try EntitlerServer(
+      key: "ent_sk_1", cache: MemoryCacheStore(capacity: 10),
+      options: EntitlerOptions(maxRetries: 0),
+      exchange: { request in
+        func reply(_ status: Int, _ body: String, _ headers: [String: String] = [:]) -> (
+          Data, HTTPURLResponse
+        ) {
+          (
+            Data(body.utf8),
+            HTTPURLResponse(
+              url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
+          )
+        }
+        guard request.httpMethod == "GET" else {
+          await writeStarted.open()
+          await writeMaySettle.wait()
+          try Task.checkCancellation()
+          return outcome == .fails
+            ? reply(500, #"{"code":"internal_error","message":"Down."}"#)
+            : reply(200, Fixture.planChange())
+        }
+        let first = gets.with { count -> Bool in
+          count += 1
+          return count == 1
+        }
+        if first, !answeredBeforeSettling {
+          await readStarted.open()
+          await readMayAnswer.wait()
+        }
+        return reply(200, Fixture.check(), ["Cache-Control": "max-age=300", "ETag": "\"e\""])
+      })
+    let customer = try server.customer("a")
+    let write = Task { try await customer.cancel() }
+    await writeStarted.wait()
+    func settle() async {
+      if outcome == .cancelled { write.cancel() }
+      await writeMaySettle.open()
+      _ = await write.result
+    }
+    if answeredBeforeSettling {
+      _ = try await customer.check("sso")
+      await settle()
+    } else {
+      let read = Task { try await customer.check("sso") }
+      await readStarted.wait()
+      await settle()
+      await readMayAnswer.open()
+      _ = try await read.value
+    }
+    _ = try await customer.check("sso")
+    #expect(gets.get == 2)
+  }
+
+  @Test func aReadDuringABatchIsNeverFreshAfterItSettles() async throws {
+    let batchStarted = Gate()
+    let batchMaySettle = Gate()
+    let gets = Box(0)
+    let server = try EntitlerServer(
+      key: "ent_sk_1", cache: MemoryCacheStore(capacity: 10),
+      options: EntitlerOptions(maxRetries: 0),
+      exchange: { request in
+        if request.httpMethod == "GET" {
+          gets.with { $0 += 1 }
+        } else {
+          await batchStarted.open()
+          await batchMaySettle.wait()
+        }
+        let http = HTTPURLResponse(
+          url: request.url!, statusCode: 200, httpVersion: nil,
+          headerFields: ["Cache-Control": "max-age=300", "ETag": "\"e\""])!
+        return request.httpMethod == "GET"
+          ? (Data(Fixture.check().utf8), http) : (FakeAnswers.usageBatch([.recorded]), http)
+      })
+    let customer = try server.customer("a")
+    let batch = Task {
+      try await server.recordUsageBatch([
+        UsageBatchEvent(
+          customer: "a", feature: Feature<Metered>("ai_credits"), amount: 1, idempotencyKey: "k")
+      ])
+    }
+    await batchStarted.wait()
+    _ = try await customer.check("sso")
+    await batchMaySettle.open()
+    #expect(try await batch.value.recorded == 1)
+    _ = try await customer.check("sso")
+    #expect(gets.get == 2)
   }
 
   @Test func perCustomerStateStaysBounded() async throws {
