@@ -116,8 +116,10 @@ public struct Customer: Sendable {
 
 private func asOfQuery(_ asOf: Date?) throws -> [(name: String, value: String)] {
   guard let asOf else { return [] }
-  guard asOf.timeIntervalSince1970.isFinite, asOf.timeIntervalSince1970 >= 0 else {
+  guard asOf.timeIntervalSince1970 >= 0,
+    let seconds = Int64(exactly: asOf.timeIntervalSince1970.rounded(.down))
+  else {
     throw ArgumentError(message: Messages.asOf)
   }
-  return [("as_of", String(Int64(asOf.timeIntervalSince1970)))]
+  return [("as_of", String(seconds))]
 }

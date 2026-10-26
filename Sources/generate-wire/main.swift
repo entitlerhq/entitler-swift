@@ -2,12 +2,6 @@ import Foundation
 
 let operations = ["Entitlements.CheckFeature", "Entitlements.ListEntitlements"]
 let schemaPrefix = "#/components/schemas/"
-let keywords: Set<String> = [
-  "as", "case", "default", "defer", "do", "else", "enum", "for", "func", "if", "import", "in",
-  "is", "let", "nil", "operator", "protocol", "repeat", "return", "self", "static", "struct",
-  "super", "switch", "throw", "true", "false", "try", "var", "where", "while",
-]
-
 typealias Object = [String: Any]
 
 struct Failure: Error, CustomStringConvertible {
@@ -15,9 +9,8 @@ struct Failure: Error, CustomStringConvertible {
 }
 
 func typeName(_ reference: String) -> String {
-  let name = String(reference.dropFirst(schemaPrefix.count))
-  return String(name[name.index(after: name.lastIndex(of: ".") ?? name.startIndex)...])
-    .replacingOccurrences(of: "-", with: "")
+  let name = reference.dropFirst(schemaPrefix.count)
+  return String(name.split(separator: ".").last ?? name).replacingOccurrences(of: "-", with: "")
 }
 
 func swiftType(_ schema: Object, references: inout Set<String>) -> String {
@@ -42,13 +35,17 @@ func swiftType(_ schema: Object, references: inout Set<String>) -> String {
   }
 }
 
-func declaration(_ name: String, _ schema: Object, references: inout Set<String>) -> String {
+func declaration(_ name: String, _ schema: Object, references: inout Set<String>) throws
+  -> String
+{
   let required = Set(schema["required"] as? [String] ?? [])
-  let fields = (schema["properties"] as? Object ?? [:]).keys.sorted().map { field in
-    let type = swiftType(
-      (schema["properties"] as! Object)[field] as! Object, references: &references)
-    let label = keywords.contains(field) ? "`\(field)`" : field
-    return "    var \(label): \(type)\(required.contains(field) ? "" : "?")"
+  let properties = schema["properties"] as? Object ?? [:]
+  let fields = try properties.keys.sorted().map { field in
+    guard let property = properties[field] as? Object else {
+      throw Failure(description: "\(name).\(field) is not a schema object.")
+    }
+    let type = swiftType(property, references: &references)
+    return "    var `\(field)`: \(type)\(required.contains(field) ? "" : "?")"
   }
   guard !fields.isEmpty else { return "  struct \(name): Decodable, Sendable {}" }
   return (["  struct \(name): Decodable, Sendable {"] + fields + ["  }"]).joined(separator: "\n")
@@ -101,7 +98,7 @@ func generate(_ document: Object) throws -> String {
     if schema["enum"] != nil {
       declarations[typeName(reference)] = "  typealias \(typeName(reference)) = String"
     } else {
-      declarations[typeName(reference)] = declaration(
+      declarations[typeName(reference)] = try declaration(
         typeName(reference), schema, references: &references)
     }
   }

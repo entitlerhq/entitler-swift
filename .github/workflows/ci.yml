@@ -17,7 +17,7 @@ jobs:
   lint:
     name: Lint and format
     runs-on: ubuntu-24.04
-    container: swift:6.4-noble
+    container: swift:6.4-noble@sha256:19cbe56bdaec1918f7cf5fdeba42b9bd55bdd8a6149c9990d0e0e3a89a127d63
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,7 +27,7 @@ jobs:
   generated:
     name: Wire types match openapi.json
     runs-on: ubuntu-24.04
-    container: swift:6.4-noble
+    container: swift:6.4-noble@sha256:19cbe56bdaec1918f7cf5fdeba42b9bd55bdd8a6149c9990d0e0e3a89a127d63
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,8 +43,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: "Linux, Swift 6.0", os: ubuntu-24.04, container: "swift:6.0-noble" }
-          - { name: "Linux, Swift 6.4", os: ubuntu-24.04, container: "swift:6.4-noble", sanitize: true }
+          - { name: "Linux, Swift 6.0", os: ubuntu-24.04, container: "swift:6.0-noble@sha256:f19aea3f9a889df5884e1186e60be74869613477d99656b598c115a4b91af8a1" }
+          - { name: "Linux, Swift 6.4", os: ubuntu-24.04, container: "swift:6.4-noble@sha256:19cbe56bdaec1918f7cf5fdeba42b9bd55bdd8a6149c9990d0e0e3a89a127d63", sanitize: true }
           - { name: "macOS, newest Xcode", os: macos-15, apple: true }
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
