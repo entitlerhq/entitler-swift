@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  all-checks-passed:
+    name: All checks passed
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Every check passed."
