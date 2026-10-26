@@ -105,17 +105,26 @@ import Testing
     await #expect(throws: ArgumentError.self) {
       try await api.server().customer("ada").check("")
     }
+    await #expect(throws: ArgumentError.self) {
+      try await api.server().customer("ada").check(
+        "priority_support", asOf: Date(timeIntervalSince1970: 1e30))
+    }
     #expect(api.requests.isEmpty)
   }
 
   @Test func anAnswerWithoutARequiredFieldIsResponseInvalid() async throws {
-    let api = FakeAPI([Answer(body: #"{"customer": {"externalId": "ada"}}"#)])
+    let api = FakeAPI([
+      Answer(
+        headers: ["ETag": "W/\"v1\"", "x-request-id": "rq_2"],
+        body: #"{"customer": {"externalId": "ada"}}"#)
+    ])
     do {
-      _ = try await api.server(cache: nil).customer("ada").check("priority_support")
+      _ = try await api.server().customer("ada").check("priority_support")
       Issue.record("Expected a failure.")
     } catch EntitlerError.api(let error) {
       #expect(error.reason == .responseInvalid)
       #expect(error.underlyingError is AnswerMismatch)
+      #expect(error.requestID == "rq_2")
     }
   }
 

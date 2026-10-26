@@ -286,7 +286,8 @@ final class Core: Sendable, CustomReflectable {
           body: String(decoding: response.body, as: UTF8.self), etag: response.etag,
           cacheControl: response.cacheControl, age: response.age, receivedAt: receivedAt)
       }
-      let answer = try decoded(entry.map(Response.init) ?? response, decode)
+      let answer = try decoded(
+        response.status == 304 ? entry.map(Response.init) ?? response : response, decode)
       if let entry { await store(entry, key: key, in: cache) }
       return answer
     } catch let error as EntitlerError where error.isUnreachable {
