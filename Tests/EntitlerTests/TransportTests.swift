@@ -141,6 +141,34 @@ import Testing
     #expect(stale.stale)
   }
 
+  @Test func anUnreadableKeptAnswerIsAMiss() async throws {
+    let store = MemoryCacheStore(capacity: 10)
+    let api = FakeAPI([Answer(body: switchCheck)])
+    let server = try api.server(cache: store)
+    let request = try Wire.entitlementsCheckFeature.request([
+      "customer.external_id": "ada", "feature_key": "priority_support",
+    ])
+    await store.setEntry(
+      CacheEntry(
+        body: "{", etag: "W/\"v0\"", cacheControl: "private, max-age=600", age: nil,
+        receivedAt: Date()),
+      forKey: server.core.cacheKey(request), timeToLive: 600)
+
+    let check = try await server.customer("ada").check("priority_support")
+
+    #expect(check.entitled)
+    #expect(api.requests.count == 1)
+    #expect(api.requests.first?.value(forHTTPHeaderField: "If-None-Match") == nil)
+  }
+
+  @Test(arguments: [
+    (header: "private, max-age=60", expected: true), (header: "no-store-ish", expected: false),
+    (header: "x-max-age-hint=5", expected: false), (header: " Max-Age = 5", expected: true),
+  ])
+  func cacheDirectivesMatchByExactName(header: String, expected: Bool) {
+    #expect(hasCacheDirective("max-age", in: header) == expected)
+  }
+
   @Test func theCacheKeyHoldsNoCredential() throws {
     let server = try FakeAPI([]).server()
     let request = try Wire.entitlementsListEntitlements.request(["customer.external_id": "ada"])

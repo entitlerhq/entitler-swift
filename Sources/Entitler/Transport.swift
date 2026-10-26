@@ -47,7 +47,7 @@ struct Response: Sendable {
   let age: Int?
   var requestID: String? = nil
 
-  var noStore: Bool { cacheControl?.lowercased().contains("no-store") ?? false }
+  var noStore: Bool { hasCacheDirective("no-store", in: cacheControl) }
 }
 
 enum OutageAnswer: Sendable {
@@ -247,14 +247,25 @@ final class Core: Sendable, CustomReflectable {
     _ request: Request, cache: any CacheStore, decode: (Data) throws -> Answer
   ) async throws -> Answer {
     let key = cacheKey(request)
-    let kept = await entry(key, in: cache)
-    if !request.revalidate, let kept, kept.isFresh(at: hooks.now()) {
-      return try decoded(Response(kept), decode)
+    var kept = await entry(key, in: cache)
+    var keptAnswer: Answer?
+    if let entry = kept {
+      do {
+        keptAnswer = try decode(Data(entry.body.utf8))
+      } catch {
+        report(error)
+        kept = nil
+      }
+    }
+    if !request.revalidate, let kept, let keptAnswer, kept.isFresh(at: hooks.now()) {
+      return keptAnswer
     }
     var outage = OutageAnswer.ask
-    if let kept, hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor {
+    if let kept, let keptAnswer,
+      hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor
+    {
       outage = await state.outageAnswer(at: hooks.now())
-      if outage == .serveKept { return markedStale(try decoded(Response(kept), decode)) }
+      if outage == .serveKept { return markedStale(keptAnswer) }
     }
     do {
       let answer = try await askAPI(request, key: key, kept: kept, cache: cache, decode: decode)
@@ -280,7 +291,7 @@ final class Core: Sendable, CustomReflectable {
           cacheControl: response.cacheControl ?? kept.cacheControl, age: response.age ?? kept.age,
           receivedAt: receivedAt)
       } else if !response.noStore,
-        response.etag != nil || response.cacheControl?.lowercased().contains("max-age") == true
+        response.etag != nil || hasCacheDirective("max-age", in: response.cacheControl)
       {
         entry = CacheEntry(
           body: String(decoding: response.body, as: UTF8.self), etag: response.etag,

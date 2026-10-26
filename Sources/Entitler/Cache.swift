@@ -100,3 +100,9 @@ public actor MemoryCacheStore: CacheStore {
 
   func removeAll() { entries = [:] }
 }
+
+func hasCacheDirective(_ name: String, in header: String?) -> Bool {
+  (header ?? "").lowercased().split(separator: ",").contains {
+    $0.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces) == name
+  }
+}
