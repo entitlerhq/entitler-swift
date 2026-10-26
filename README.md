@@ -2,7 +2,7 @@
 
 The official Entitler SDK for Swift.
 
-It isn't available yet. This repository is where the SDK will live; there's no code to install or use.
+It isn't released yet: the code here is a work in progress.
 
 When released, it will be available through Swift Package Manager from `https://github.com/entitlerhq/entitler-swift`.
 

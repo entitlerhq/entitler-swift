@@ -9,3 +9,12 @@ updates:
     groups:
       actions:
         update-types: [minor, patch]
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      swift:
+        update-types: [minor, patch]
