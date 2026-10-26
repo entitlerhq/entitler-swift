@@ -21,8 +21,8 @@ public struct EntitlerOptions: Sendable {
   /// How long, in seconds, a kept answer may stand in while Entitler is unreachable.
   public var staleFor: TimeInterval
   /// Called with each error a fallback absorbed: a stale answer, an `isEntitled` default (an
-  /// ``ArgumentError`` for a blank key included), a hold's failed release or disposal, or a custom
-  /// store's own failure. It never changes a call's answer.
+  /// ``ArgumentError`` for a blank key included), or a custom store's own failure. It never
+  /// changes a call's answer.
   public var onError: (@Sendable (any Error) -> Void)?
   /// The session requests go through, for tests, proxies and instrumentation.
   ///
