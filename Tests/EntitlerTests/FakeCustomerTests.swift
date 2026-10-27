@@ -1,7 +1,8 @@
 import Entitler
-import EntitlerTesting
 import Foundation
 import Testing
+
+@testable import EntitlerTesting
 
 @Suite struct FakeCustomerTests {
   let aiCredits = Feature<Metered>("ai_credits")
@@ -67,6 +68,58 @@ import Testing
       Issue.record("Expected a refusal.")
     } catch EntitlerError.usageRefused(let error) {
       #expect(error.result.refusal == .overAllowance)
+    }
+  }
+
+  @Test func aCustomerIDWithASlashRoutesToTheFake() async throws {
+    let fake = try FakeCustomer(["export_pdf": true], id: "org/user")
+    #expect(try await fake.customer.check("export_pdf").entitled)
+  }
+
+  @Test func aHoldExpiresAfterItsTTLAndFreesTheAllowance() async throws {
+    let clock = Clock()
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 10)], id: "user_1") { clock.now }
+    let hold = try await fake.customer.holdUsage(
+      of: aiCredits, amount: 10, idempotencyKey: "h-1", ttlSeconds: 60)
+    clock.now += 60
+
+    #expect(try await fake.customer.check(aiCredits).meter.held == 0)
+    do {
+      _ = try await fake.customer.settleUsage(hold: try #require(hold.holdID), amount: 10)
+      Issue.record("Expected an expired hold.")
+    } catch EntitlerError.api(let error) {
+      #expect(error.reason == .holdExpired)
+    }
+    #expect(fake.used("ai_credits") == 0)
+  }
+
+  @Test func settlingMoreThanTheHoldIsRefusedAndKeepsIt() async throws {
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 10)])
+    let hold = try await fake.customer.holdUsage(of: aiCredits, amount: 1, idempotencyKey: "h-1")
+    let id = try #require(hold.holdID)
+
+    await #expect(throws: EntitlerError.self) {
+      try await fake.customer.settleUsage(hold: id, amount: 2)
+    }
+    #expect(try await fake.customer.settleUsage(hold: id, amount: 1).outcome == .settled)
+    #expect(fake.used("ai_credits") == 1)
+  }
+}
+
+final class Clock: @unchecked Sendable {
+  private let lock = NSLock()
+  private var instant = Date(timeIntervalSince1970: 1_790_000_000)
+
+  var now: Date {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return instant
+    }
+    set {
+      lock.lock()
+      defer { lock.unlock() }
+      instant = newValue
     }
   }
 }
