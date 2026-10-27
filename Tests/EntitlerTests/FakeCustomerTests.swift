@@ -7,7 +7,7 @@ import Testing
   let aiCredits = Feature<Metered>("ai_credits")
 
   @Test func checksAnswerTheValues() async throws {
-    let fake = FakeCustomer([
+    let fake = try FakeCustomer([
       "export_pdf": true, "seats": 5, "sso": .unlimited,
       "ai_credits": .metered(limit: 100, used: 97),
     ])
@@ -20,7 +20,7 @@ import Testing
   }
 
   @Test func usageMovesTheMeterAndRefusesWhatDoesNotFit() async throws {
-    let fake = FakeCustomer(["ai_credits": .metered(limit: 100, used: 97)])
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 100, used: 97)])
     let refused = try await fake.customer.recordUsage(
       of: aiCredits, amount: 5, idempotencyKey: "m-1")
     let recorded = try await fake.customer.recordUsage(
@@ -37,7 +37,7 @@ import Testing
   }
 
   @Test func withHoldSettlesWhatTheWorkUsed() async throws {
-    let fake = FakeCustomer(["ai_credits": .metered(limit: 1_000)])
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 1_000)])
     let summary = try await fake.me.withHold(
       of: aiCredits, amount: 500, idempotencyKey: "summary-1"
     ) { hold in
@@ -50,8 +50,18 @@ import Testing
     #expect(fake.writes.map(\.method) == ["holdUsage", "settleUsage"])
   }
 
+  @Test func observedUsageIsRecordedPastTheAllowance() async throws {
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 100, used: 97)])
+    let result = try await fake.customer.recordUsage(
+      of: aiCredits, amount: 5, idempotencyKey: "m-1", mode: .observe)
+
+    #expect(result.mode == .observe)
+    #expect(result.overBy == 2)
+    #expect(throws: ArgumentError.self) { try FakeCustomer([:], id: "me") }
+  }
+
   @Test func aHoldThatDoesNotFitIsRefused() async throws {
-    let fake = FakeCustomer(["ai_credits": .metered(limit: 100, used: 90)])
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 100, used: 90)])
     do {
       _ = try await fake.customer.startHold(of: aiCredits, amount: 20, idempotencyKey: "m-1")
       Issue.record("Expected a refusal.")

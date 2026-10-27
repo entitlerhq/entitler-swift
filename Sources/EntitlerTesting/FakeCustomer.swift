@@ -43,7 +43,7 @@ public struct FakeWrite: Sendable, Hashable {
 /// it keeps in memory, through the SDK's real decoding.
 ///
 /// ```swift
-/// let fake = FakeCustomer(["export_pdf": true, "ai_credits": .metered(limit: 100, used: 97)])
+/// let fake = try FakeCustomer(["export_pdf": true, "ai_credits": .metered(limit: 100, used: 97)])
 /// try await exportReport(for: fake.customer)
 /// #expect(fake.writes.map(\.method) == ["recordUsage"])
 /// ```
@@ -65,7 +65,8 @@ public final class FakeCustomer: Sendable {
   /// - Parameters:
   ///   - values: Feature keys and their values.
   ///   - id: The customer's external id.
-  public init(_ values: [String: FakeValue], id: String = "user_1") {
+  /// - Throws: ``ArgumentError`` for a blank id, or for `me`.
+  public init(_ values: [String: FakeValue], id: String = "user_1") throws {
     let state = Locked(FakeState(id: id, values: values))
     self.state = state
     let options = EntitlerOptions(
@@ -78,8 +79,8 @@ public final class FakeCustomer: Sendable {
           url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: [:])!
       )
     }
-    customer = try! EntitlerServer(key: "fake", options: options, exchange: exchange).customer(id)
-    me = try! EntitlerClient(token: "fake", options: options, exchange: exchange).me
+    customer = try EntitlerServer(key: "fake", options: options, exchange: exchange).customer(id)
+    me = try EntitlerClient(token: "fake", options: options, exchange: exchange).me
   }
 
   /// Every write received, in order.
@@ -130,7 +131,9 @@ struct FakeState {
   mutating func answer(_ request: URLRequest) -> (Int, Data) {
     let path = request.url?.path ?? ""
     let parts = path.split(separator: "/").map(String.init)
-    guard parts.count >= 4, parts[0] == "v1", parts[1] == "customers" else {
+    guard parts.count >= 4, parts[0] == "v1", parts[1] == "customers",
+      [id, "me"].contains(parts[2])
+    else {
       return refused(501, "Unimplemented", "FAKE_UNSUPPORTED")
     }
     let rest = Array(parts.dropFirst(3))
@@ -143,12 +146,12 @@ struct FakeState {
       guard values[rest[1]] != nil else { return refused(404, "NotFound", "FEATURE_NOT_FOUND") }
       return (200, json(context(["entitlement": entitlement(rest[1])])))
     case ("POST", 1, "usage"):
-      return replay(body) { state in state.report(body) }
+      return replay(body, "recordUsage") { state in state.report(body) }
     case ("POST", 2, "usage") where rest[1] == "holds":
-      return replay(body) { state in state.hold(body) }
-    case ("POST", 3, "usage") where rest[2].hasSuffix(":settle"):
+      return replay(body, "holdUsage") { state in state.hold(body) }
+    case ("POST", 3, "usage") where rest[1] == "holds" && rest[2].hasSuffix(":settle"):
       return close(String(rest[2].dropLast(":settle".count)), settling: int(body["amount"]))
-    case ("DELETE", 3, "usage"):
+    case ("DELETE", 3, "usage") where rest[1] == "holds":
       return close(rest[2], settling: nil)
     default:
       return refused(501, "Unimplemented", "FAKE_UNSUPPORTED")
@@ -156,9 +159,9 @@ struct FakeState {
   }
 
   private mutating func replay(
-    _ body: [String: Any], _ write: (inout FakeState) -> (Int, [String: Any])
+    _ body: [String: Any], _ method: String, _ write: (inout FakeState) -> (Int, [String: Any])
   ) -> (Int, Data) {
-    let key = body["idempotencyKey"] as? String ?? ""
+    let key = method + "\n" + (body["idempotencyKey"] as? String ?? "")
     if var reply = replies[key] {
       var usage = reply["usage"] as? [String: Any] ?? [:]
       usage["replayed"] = true
@@ -176,7 +179,8 @@ struct FakeState {
   private mutating func report(_ body: [String: Any]) -> (Int, [String: Any]) {
     let feature = body["featureKey"] as? String ?? ""
     let amount = int(body["amount"])
-    let observe = body["mode"] as? String == "USAGE_MODE_OBSERVE"
+    let mode = body["mode"] as? String ?? "USAGE_MODE_GATE"
+    let observe = mode == "USAGE_MODE_OBSERVE"
     writes.append(
       FakeWrite(
         method: "recordUsage", target: feature, amount: amount,
@@ -188,7 +192,7 @@ struct FakeState {
       return (200, tracked(feature, outcome: "REFUSED", amount: amount, refusal: "OVER_ALLOWANCE"))
     }
     used[feature, default: 0] += amount
-    return (200, tracked(feature, outcome: "RECORDED", amount: amount, change: amount))
+    return (200, tracked(feature, outcome: "RECORDED", amount: amount, change: amount, mode: mode))
   }
 
   private mutating func hold(_ body: [String: Any]) -> (Int, [String: Any]) {
@@ -254,10 +258,11 @@ struct FakeState {
 
   private func tracked(
     _ feature: String, outcome: String, amount: Int64, change: Int64 = 0,
-    refusal: String? = nil, hold: String? = nil, expiresAtMs: Int64? = nil
+    refusal: String? = nil, hold: String? = nil, expiresAtMs: Int64? = nil,
+    mode: String = "USAGE_MODE_GATE"
   ) -> [String: Any] {
     var usage: [String: Any] = [
-      "outcome": "USAGE_OUTCOME_\(outcome)", "mode": "USAGE_MODE_GATE", "amount": amount,
+      "outcome": "USAGE_OUTCOME_\(outcome)", "mode": mode, "amount": amount,
       "meterChange": change, "overBy": overBy(feature), "late": false, "replayed": false,
       "saturated": false,
     ]
