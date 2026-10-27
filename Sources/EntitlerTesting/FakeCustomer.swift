@@ -207,7 +207,9 @@ struct FakeState {
       FakeWrite(
         method: "recordUsage", target: feature, amount: amount,
         idempotencyKey: body["idempotencyKey"] as? String))
-    guard let limit = meterLimit(feature) else { return refusedObject(feature) }
+    guard let limit = meterLimit(feature) else {
+      return refusedObject(feature, amount: amount, mode: mode)
+    }
     let fits =
       limit.map { used[feature, default: 0] + held[feature, default: 0] + amount <= $0 } ?? true
     guard fits || observe else {
@@ -230,7 +232,7 @@ struct FakeState {
       FakeWrite(
         method: "holdUsage", target: feature, amount: amount,
         idempotencyKey: body["idempotencyKey"] as? String))
-    guard let limit = meterLimit(feature) else { return refusedObject(feature) }
+    guard let limit = meterLimit(feature) else { return refusedObject(feature, amount: amount) }
     guard
       limit.map({ used[feature, default: 0] + held[feature, default: 0] + amount <= $0 }) ?? true
     else {
@@ -303,11 +305,16 @@ struct FakeState {
     }
   }
 
-  private func refusedObject(_ feature: String) -> (Int, [String: Any]) {
+  private func refusedObject(
+    _ feature: String, amount: Int64, mode: String = "USAGE_MODE_GATE"
+  ) -> (Int, [String: Any]) {
     switch values[feature] {
     case nil: return (404, errorObject("NotFound", "FEATURE_NOT_FOUND"))
     case .metered:
-      return (200, tracked(feature, outcome: "REFUSED", amount: 0, refusal: "NOT_ENTITLED"))
+      return (
+        200,
+        tracked(feature, outcome: "REFUSED", amount: amount, refusal: "NOT_ENTITLED", mode: mode)
+      )
     default: return (400, errorObject("FailedPrecondition", "USAGE_FEATURE_NOT_METERED"))
     }
   }
