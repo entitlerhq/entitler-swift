@@ -511,7 +511,7 @@ private func epochMilliseconds(_ date: Date) throws -> Int64 {
   return value
 }
 
-private func validIdempotencyKey(_ key: String, maxLength: Int = 200) throws -> String {
+func validIdempotencyKey(_ key: String, maxLength: Int = 200) throws -> String {
   let bytes = Array(key.utf8)
   guard !bytes.isEmpty, bytes.count <= maxLength,
     bytes.allSatisfy({ (0x20...0x7E).contains($0) }), bytes.first != 0x20, bytes.last != 0x20

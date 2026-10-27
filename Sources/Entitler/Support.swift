@@ -94,6 +94,13 @@ enum Messages {
   static let ttlSeconds = "Pass ttlSeconds as a whole number from 1 to 3600."
   static let occurredAt = "Pass occurredAt as a valid date."
   static let snapshotLifetime = "Pass ttlSeconds as a whole number from 60 to 2592000."
+  static let grant = "Provide the id of the grant."
+  static let track = "Pass the track's id, or nil for the default track."
+  static let usageReport = "Provide the id of the usage report."
+  static let grantDays = "Pass days as a whole number from 1 to 3650."
+  static let grantValue = "Pass value as on, unlimited, or an amount of 0 or more."
+  static let setTo = "Pass setTo as a whole number of 0 or more."
+  static let expectedRevision = "Pass expectedRevision as a whole number of 0 or more."
   static let locale = "Pass locale as a valid BCP 47 language tag."
   static let clockSkew = "Pass clockSkewSeconds as a whole number from 0 to 300."
 }
