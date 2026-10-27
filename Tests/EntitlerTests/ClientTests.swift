@@ -81,6 +81,7 @@ let revalidated = ["ETag": "W/\"v1\"", "Cache-Control": "private, no-cache"]
       Issue.record("Expected a token error.")
     } catch EntitlerError.token(let error) {
       #expect(error.message == Messages.tokenRefused)
+      #expect(!EntitlerError.token(error).isUnreachable)
     }
     #expect(api.requests.count == 1)
   }
@@ -104,6 +105,25 @@ let revalidated = ["ETag": "W/\"v1\"", "Cache-Control": "private, no-cache"]
     #expect(withoutToken.stale)
     #expect(api.requests.count == 2)
     #expect(reported.read() == 2)
+  }
+
+  @Test func aProviderThatIgnoresCancellationStillTimesOut() async throws {
+    let gate = LockedValue<CheckedContinuation<Void, Never>?>(nil)
+    let provider: TokenProvider = {
+      await withCheckedContinuation { continuation in gate.update { $0 = continuation } }
+      return "ctk_late"
+    }
+    let entitler = try EntitlerClient(
+      kind: .token, cache: nil, options: EntitlerOptions(maxRetries: 0),
+      exchange: FakeAPI([]).exchange, hooks: Hooks(sleep: { _ in }, deadline: { _ in }),
+      credentials: provided(provider, key: nil))
+    do {
+      _ = try await entitler.me.check("priority_support")
+      Issue.record("Expected a token error.")
+    } catch EntitlerError.token(let error) {
+      #expect(error.providerUnreachable)
+    }
+    gate.update { $0.take() }?.resume()
   }
 
   @Test func isEntitledAnswersItsDefaultWhenTheProviderFails() async throws {

@@ -48,11 +48,12 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     }
   }
 
-  /// True when Entitler could not be reached: no answer, a timeout, a token provider failing
-  /// (offline, typically), a `408`, a `429`, a `5xx` or an answer this SDK cannot read. An app that can work offline falls back to its last known answer.
+  /// True when Entitler could not be reached: no answer, a timeout, a token provider failing or
+  /// timing out (offline, typically), a `408`, a `429`, a `5xx` or an answer this SDK cannot read. An app that can work offline falls back to its last known answer.
   public var isUnreachable: Bool {
     switch self {
-    case .connection, .timeout, .token: true
+    case .connection, .timeout: true
+    case .token(let error): error.providerUnreachable
     case .api(let error):
       [408, 429].contains(error.status) || error.status >= 500 || error.reason == .responseInvalid
     case .usageRefused, .usageReplayed, .usageSettlement: false
@@ -249,6 +250,8 @@ public struct TokenError: Error, Sendable, LocalizedError, CustomStringConvertib
   public let message: String
   /// The provider's own error, kept as it is, or `nil`.
   public let underlyingError: (any Error)?
+  /// True when the provider failed or timed out, rather than answering a token the SDK refuses.
+  public internal(set) var providerUnreachable = false
 
   /// The message.
   public var errorDescription: String? { message }
