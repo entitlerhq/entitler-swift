@@ -110,11 +110,13 @@ import Testing
     let fake = try FakeCustomer(["ai_credits": .metered(limit: 10)], id: "user_1") { clock.now }
     let first = try await fake.customer.holdUsage(
       of: aiCredits, amount: 1, idempotencyKey: "h-1", ttlSeconds: 60)
-    clock.now += 60
     let second = try await fake.customer.holdUsage(
       of: aiCredits, amount: 1, idempotencyKey: "h-2", ttlSeconds: 60)
+    clock.now += 60
+    let third = try await fake.customer.holdUsage(
+      of: aiCredits, amount: 1, idempotencyKey: "h-3", ttlSeconds: 60)
 
-    #expect(first.holdID != second.holdID)
+    #expect(Set([first.holdID, second.holdID, third.holdID]).count == 3)
     do {
       _ = try await fake.customer.startHold(of: aiCredits, amount: 1, idempotencyKey: "h-1")
       Issue.record("Expected a replayed hold.")
