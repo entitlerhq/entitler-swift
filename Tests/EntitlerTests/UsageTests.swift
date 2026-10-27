@@ -114,13 +114,16 @@ func body(_ request: URLRequest) -> [String: Any] {
     } catch EntitlerError.usageReplayed {}
   }
 
-  @Test func aHoldWithABlankIDIsNotOpened() async throws {
-    let api = FakeAPI([Answer(body: usage("HELD", holdID: " "))])
+  @Test func aHeldAnswerWithABlankIDIsResponseInvalid() async throws {
+    let api = FakeAPI([Answer(body: usage("HELD", holdID: "\u{00A0}"))])
     do {
       _ = try await api.server().customer("ada").startHold(
         of: aiCredits, amount: 500, idempotencyKey: "m-1")
-      Issue.record("Expected a replay.")
-    } catch EntitlerError.usageReplayed {}
+      Issue.record("Expected a failure.")
+    } catch EntitlerError.api(let error) {
+      #expect(error.reason == .responseInvalid)
+      #expect(error.idempotencyKey == "m-1")
+    }
   }
 
   @Test func aDuplicateIsAnotherCallersHoldUnlessOurOwnRetryMetIt() async throws {
