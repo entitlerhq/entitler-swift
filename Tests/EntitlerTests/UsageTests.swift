@@ -69,12 +69,12 @@ func body(_ request: URLRequest) -> [String: Any] {
       Answer(status: 503, body: refusal("Unavailable", nil)),
       Answer(status: 503, body: refusal("Unavailable", nil)),
     ])
-    await #expect {
+    do {
       try await api.server().customer("ada").recordUsage(
         of: aiCredits, amount: 1, idempotencyKey: "run-1")
-    } throws: { error in
-      guard case EntitlerError.api(let failure) = error else { return false }
-      return failure.idempotencyKey == "run-1"
+      Issue.record("Expected a failure.")
+    } catch EntitlerError.api(let failure) {
+      #expect(failure.idempotencyKey == "run-1")
     }
     #expect(api.requests.count == 3)
   }
@@ -96,24 +96,22 @@ func body(_ request: URLRequest) -> [String: Any] {
 
   @Test func aRefusedHoldThrowsWithTheAnswer() async throws {
     let api = FakeAPI([Answer(body: usage("REFUSED", refusal: "OVER_ALLOWANCE"))])
-    await #expect {
-      try await api.server().customer("ada").startHold(
+    do {
+      _ = try await api.server().customer("ada").startHold(
         of: aiCredits, amount: 500, idempotencyKey: "m-1")
-    } throws: { error in
-      guard case EntitlerError.usageRefused(let refused) = error else { return false }
-      return refused.result.refusal == .overAllowance
+      Issue.record("Expected a refusal.")
+    } catch EntitlerError.usageRefused(let refused) {
+      #expect(refused.result.refusal == .overAllowance)
     }
   }
 
   @Test func aHoldWhoseKeyWasAlreadySettledIsAReplay() async throws {
     let api = FakeAPI([Answer(body: usage("SETTLED", holdID: "ho_1"))])
-    await #expect {
-      try await api.server().customer("ada").startHold(
+    do {
+      _ = try await api.server().customer("ada").startHold(
         of: aiCredits, amount: 500, idempotencyKey: "m-1")
-    } throws: { error in
-      guard case EntitlerError.usageReplayed = error else { return false }
-      return true
-    }
+      Issue.record("Expected a replay.")
+    } catch EntitlerError.usageReplayed {}
   }
 
   @Test func aDuplicateIsAnotherCallersHoldUnlessOurOwnRetryMetIt() async throws {
@@ -216,17 +214,20 @@ func body(_ request: URLRequest) -> [String: Any] {
       Answer(body: usage("HELD", holdID: "ho_1")),
       Answer(status: 400, body: refusal("InvalidArgument", "AMOUNT_INVALID")),
     ])
-    await #expect {
-      try await api.server().customer("ada").withHold(
+    do {
+      _ = try await api.server().customer("ada").withHold(
         of: aiCredits, amount: 500, idempotencyKey: "m-1"
       ) { hold in
         try hold.use(80)
         return "output"
       }
-    } throws: { error in
-      guard case EntitlerError.usageSettlement(let failure) = error else { return false }
-      return failure.result as? String == "output" && !failure.settled && failure.amount == 80
-        && failure.excess == nil && failure.excessKey == "m-1:excess"
+      Issue.record("Expected a failure.")
+    } catch EntitlerError.usageSettlement(let failure) {
+      #expect(failure.result as? String == "output")
+      #expect(!failure.settled)
+      #expect(failure.amount == 80)
+      #expect(failure.excess == nil)
+      #expect(failure.excessKey == "m-1:excess")
     }
   }
 }
