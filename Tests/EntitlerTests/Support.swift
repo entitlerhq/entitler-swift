@@ -89,6 +89,8 @@ let meteredCheck = #"""
       "kind": "ENTITLED_FEATURE_KIND_METERED",
       "entitled": true,
       "value": {"metered": {"count": 1000}},
+      "sources": [],
+      "upgrades": [],
       "meter": {"used": 250, "held": 50, "banked": 0, "remaining": {"count": 700}, "resetsAt": 1790500000}
     }
   }
@@ -101,11 +103,11 @@ let entitlementList = #"""
     "served": {"changeId": "ch_1"},
     "entitlements": [
       {"featureKey": "priority_support", "kind": "ENTITLED_FEATURE_KIND_SWITCH", "entitled": true,
-        "value": {"switch": true}},
+        "value": {"switch": true}, "sources": [], "upgrades": []},
       {"featureKey": "seats", "kind": "ENTITLED_FEATURE_KIND_CONFIGURATION", "entitled": true,
-        "value": {"configuration": {"unlimited": {}}}},
+        "value": {"configuration": {"unlimited": {}}}, "sources": [], "upgrades": []},
       {"featureKey": "collaboration", "kind": "ENTITLED_FEATURE_KIND_GROUP", "entitled": false,
-        "value": {"group": {"members": []}}, "sources": [{"group": {"featureKeys": ["seats"]}}]}
+        "value": {"group": {"members": []}}, "sources": [{"group": {"featureKeys": ["seats"]}}], "upgrades": []}
     ]
   }
   """#

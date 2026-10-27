@@ -116,7 +116,7 @@ import Testing
     let api = FakeAPI([
       Answer(
         headers: ["ETag": "W/\"v1\"", "x-request-id": "rq_2"],
-        body: #"{"customer": {"externalId": "ada"}}"#)
+        body: #"{"asOf": 1790000000, "customer": {"externalId": "ada"}}"#)
     ])
     do {
       _ = try await api.server().customer("ada").check("priority_support")

@@ -34,8 +34,7 @@ private let featureTypes: [String: FeatureType] = [
   "ENTITLED_FEATURE_KIND_GROUP": .group,
 ]
 
-private func openName(_ value: String?, prefix: String) throws -> OpenName {
-  let name = try given(value)
+private func openName(_ name: String, prefix: String) -> OpenName {
   guard name.hasPrefix(prefix) else { return OpenName(rawValue: name) }
   return OpenName(rawValue: String(name.dropFirst(prefix.count)).lowercased())
 }
@@ -75,11 +74,11 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
     return try at("plan") {
       .plan(
         PlanSource(
-          planID: try at("planId") { try given(plan.planId) },
-          plan: try at("planKey") { try given(plan.planKey) },
-          name: try at("planName") { try given(plan.planName) },
+          planID: plan.planId,
+          plan: plan.planKey,
+          name: plan.planName,
           product: plan.productId,
-          version: try at("versionNumber") { try given(plan.versionNumber) },
+          version: plan.versionNumber,
           byDefault: false,
           value: try at("value") { try sourceValue(plan.value) },
           through: through(plan.throughFeatureKey)))
@@ -89,11 +88,11 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
     return try at("defaultPlan") {
       .plan(
         PlanSource(
-          planID: try at("planId") { try given(plan.planId) },
-          plan: try at("planKey") { try given(plan.planKey) },
-          name: try at("planName") { try given(plan.planName) },
+          planID: plan.planId,
+          plan: plan.planKey,
+          name: plan.planName,
           product: plan.productId,
-          version: try at("versionNumber") { try given(plan.versionNumber) },
+          version: plan.versionNumber,
           byDefault: true,
           value: nil,
           through: through(plan.throughFeatureKey)))
@@ -103,11 +102,11 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
     return try at("addOn") {
       .addOn(
         AddOnSource(
-          planID: try at("planId") { try given(addOn.planId) },
-          plan: try at("planKey") { try given(addOn.planKey) },
-          name: try at("planName") { try given(addOn.planName) },
-          version: try at("versionNumber") { try given(addOn.versionNumber) },
-          quantity: try at("quantity") { try given(addOn.quantity) },
+          planID: addOn.planId,
+          plan: addOn.planKey,
+          name: addOn.planName,
+          version: addOn.versionNumber,
+          quantity: addOn.quantity,
           value: try at("value") { try sourceValue(addOn.value) },
           through: through(addOn.throughFeatureKey)))
     }
@@ -116,53 +115,51 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
     return try at("grant") {
       .grant(
         GrantSource(
-          grant: try at("grantId") { try given(grant.grantId) },
+          grant: grant.grantId,
           until: grant.until.map(date),
           value: try at("value") { try sourceValue(grant.value) },
           through: through(grant.throughFeatureKey)))
     }
   }
   if let group = value.group {
-    return .group(features: group.featureKeys ?? [])
+    return .group(features: group.featureKeys)
   }
   return nil
 }
 
 private func upgrade(_ value: Wire.Upgrade) throws -> Upgrade {
   Upgrade(
-    kind: try at("kind") { try openName(value.kind, prefix: "UPGRADE_KIND_") },
-    planID: try at("planId") { try given(value.planId) },
-    plan: try at("planKey") { try given(value.planKey) },
-    name: try at("planName") { try given(value.planName) },
+    kind: openName(value.kind, prefix: "UPGRADE_KIND_"),
+    planID: value.planId,
+    plan: value.planKey,
+    name: value.planName,
     product: value.productId,
-    move: try at("move") { try openName(value.move, prefix: "UPGRADE_MOVE_") },
-    action: try at("action") { try openName(value.action, prefix: "UPGRADE_ACTION_") })
+    move: openName(value.move, prefix: "UPGRADE_MOVE_"),
+    action: openName(value.action, prefix: "UPGRADE_ACTION_"))
 }
 
 private func meter(_ value: Wire.Meter) throws -> Meter {
   Meter(
-    used: value.used ?? 0,
-    held: value.held ?? 0,
-    banked: value.banked ?? 0,
+    used: value.used,
+    held: value.held,
+    banked: value.banked,
     remaining: try at("remaining") { try limit(value.remaining ?? Wire.Limit(count: 0)) },
     resetsAt: value.resetsAt.map(date))
 }
 
 private func entitlement(_ value: Wire.Entitlement) throws -> Entitlement {
-  let entitled = value.entitled ?? false
-  let kind = try at("kind") { try given(value.kind) }
-  return Entitlement(
-    key: try at("featureKey") { try given(value.featureKey) },
-    type: featureTypes[kind] ?? FeatureType(rawValue: kind),
-    entitled: entitled,
-    value: try at("value") { try featureValue(value.value, entitled: entitled) },
+  Entitlement(
+    key: value.featureKey,
+    type: featureTypes[value.kind] ?? FeatureType(rawValue: value.kind),
+    entitled: value.entitled,
+    value: try at("value") { try featureValue(value.value, entitled: value.entitled) },
     sources: try at("sources") {
-      try (value.sources ?? []).enumerated().compactMap { index, item in
+      try value.sources.enumerated().compactMap { index, item in
         try at(String(index)) { try source(item) }
       }
     },
     upgrades: try at("upgrades") {
-      try (value.upgrades ?? []).enumerated().map { index, item in
+      try value.upgrades.enumerated().map { index, item in
         try at(String(index)) { try upgrade(item) }
       }
     },
@@ -170,15 +167,12 @@ private func entitlement(_ value: Wire.Entitlement) throws -> Entitlement {
 }
 
 private func served(_ value: Wire.ServedCatalogue?) throws -> Served {
-  let track = try value?.track.map { track in
-    ServedTrack(
-      id: try at("id") { try given(track.id) }, name: try at("name") { try given(track.name) })
-  }
+  let track = value?.track.map { ServedTrack(id: $0.id, name: $0.name) }
   let source: ServedSource
   if let release = value?.release {
     source = .release(
-      id: try at("release") { try at("id") { try given(release.id) } },
-      number: try at("release") { try at("number") { try given(release.number) } })
+      id: try at("release") { release.id },
+      number: try at("release") { release.number })
   } else if let change = value?.changeId {
     source = .change(id: change)
   } else {
@@ -188,13 +182,13 @@ private func served(_ value: Wire.ServedCatalogue?) throws -> Served {
 }
 
 private func context(
-  customer: Wire.EntitledCustomer?, asOf: Int64?, nextChangeAt: Int64?,
+  customer: Wire.EntitledCustomer?, asOf: Int64, nextChangeAt: Int64?,
   served value: Wire.ServedCatalogue?
 ) throws -> AnswerContext {
   AnswerContext(
-    customer: try at("customer") { try at("externalId") { try given(customer?.externalId) } },
+    customer: try at("customer") { try given(customer).externalId },
     customerID: customer?.customerId,
-    asOf: date(try at("asOf") { try given(asOf) }),
+    asOf: date(asOf),
     nextChangeAt: nextChangeAt.map(date),
     served: try at("served") { try served(value) })
 }
@@ -212,7 +206,7 @@ func decodeEntitlements(_ body: Data) throws -> Entitlements {
   let answer = try wire(Wire.ListEntitlementsResponse.self, body)
   return Entitlements(
     entitlements: try at("entitlements") {
-      try (answer.entitlements ?? []).enumerated().map { index, item in
+      try answer.entitlements.enumerated().map { index, item in
         try at(String(index)) { try entitlement(item) }
       }
     },
