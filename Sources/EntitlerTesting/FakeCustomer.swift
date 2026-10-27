@@ -175,8 +175,11 @@ struct FakeState {
     if var reply = replies[key] {
       var usage = reply["usage"] as? [String: Any] ?? [:]
       usage["replayed"] = true
-      if let hold = usage["holdId"] as? String, holds[hold] != nil {
+      if let hold = usage["holdId"] as? String {
+        let now = Int64(clock().timeIntervalSince1970)
         usage["outcome"] = "USAGE_OUTCOME_DUPLICATE"
+        reply["asOf"] = now
+        if holds[hold] == nil { usage["expiresAtMs"] = now * 1000 }
       }
       reply["usage"] = usage
       return (200, json(["tracked": reply]))
@@ -218,7 +221,7 @@ struct FakeState {
     else {
       return (200, tracked(feature, outcome: "REFUSED", amount: amount, refusal: "OVER_ALLOWANCE"))
     }
-    let id = "ho_\(holds.count + writes.count)"
+    let id = "ho_\(writes.count)"
     let ttl = int(body["ttlSeconds"]) == 0 ? 300 : int(body["ttlSeconds"])
     let expiresAt = clock().addingTimeInterval(TimeInterval(ttl))
     holds[id] = Hold(feature: feature, amount: amount, expiresAt: expiresAt)
