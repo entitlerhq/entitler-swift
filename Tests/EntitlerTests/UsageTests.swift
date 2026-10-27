@@ -3,6 +3,10 @@ import Testing
 
 @testable import Entitler
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 func usage(
   _ outcome: String, amount: Int64 = 500, holdID: String? = nil, refusal: String? = nil,
   extra: String = ""
