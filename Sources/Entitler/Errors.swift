@@ -31,6 +31,8 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   case usageReplayed(UsageReplayedError)
   /// Settling a hold, or recording what was used beyond it, failed after its retries.
   case usageSettlement(UsageSettlementError)
+  /// A snapshot did not verify.
+  case snapshot(SnapshotError)
 
   /// The message of the error this case carries.
   public var errorDescription: String? { description }
@@ -45,6 +47,7 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .usageRefused(let error): error.message
     case .usageReplayed(let error): error.message
     case .usageSettlement(let error): error.message
+    case .snapshot(let error): error.message
     }
   }
 
@@ -56,7 +59,7 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .token(let error): error.providerUnreachable
     case .api(let error):
       [408, 429].contains(error.status) || error.status >= 500 || error.reason == .responseInvalid
-    case .usageRefused, .usageReplayed, .usageSettlement: false
+    case .usageRefused, .usageReplayed, .usageSettlement, .snapshot: false
     }
   }
 
