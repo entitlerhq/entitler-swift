@@ -66,8 +66,12 @@ public final class FakeCustomer: Sendable {
   ///   - values: Feature keys and their values.
   ///   - id: The customer's external id.
   /// - Throws: ``ArgumentError`` for a blank id, or for `me`.
-  public init(_ values: [String: FakeValue], id: String = "user_1") throws {
-    let state = Locked(FakeState(id: id, values: values))
+  public convenience init(_ values: [String: FakeValue], id: String = "user_1") throws {
+    try self.init(values, id: id, clock: Date.init)
+  }
+
+  init(_ values: [String: FakeValue], id: String, clock: @escaping @Sendable () -> Date) throws {
+    let state = Locked(FakeState(id: id, values: values, clock: clock))
     self.state = state
     let options = EntitlerOptions(
       baseURL: URL(string: "https://fake.entitler.invalid")!, maxRetries: 0)
@@ -107,19 +111,22 @@ struct FakeState {
   struct Hold {
     let feature: String
     let amount: Int64
+    let expiresAt: Date
   }
 
   let id: String
   let values: [String: FakeValue]
+  let clock: @Sendable () -> Date
   var used: [String: Int64]
   var held: [String: Int64] = [:]
   var holds: [String: Hold] = [:]
   var replies: [String: [String: Any]] = [:]
   var writes: [FakeWrite] = []
 
-  init(id: String, values: [String: FakeValue]) {
+  init(id: String, values: [String: FakeValue], clock: @escaping @Sendable () -> Date) {
     self.id = id
     self.values = values
+    self.clock = clock
     used = values.compactMapValues {
       switch $0 {
       case .metered(_, let used), .unlimitedMeter(let used): used
@@ -129,8 +136,11 @@ struct FakeState {
   }
 
   mutating func answer(_ request: URLRequest) -> (Int, Data) {
-    let path = request.url?.path ?? ""
-    let parts = path.split(separator: "/").map(String.init)
+    expireHolds()
+    let path = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+    let parts = (path?.percentEncodedPath ?? "").split(separator: "/").map {
+      $0.removingPercentEncoding ?? String($0)
+    }
     guard parts.count >= 4, parts[0] == "v1", parts[1] == "customers",
       [id, "me"].contains(parts[2])
     else {
@@ -209,15 +219,24 @@ struct FakeState {
       return (200, tracked(feature, outcome: "REFUSED", amount: amount, refusal: "OVER_ALLOWANCE"))
     }
     let id = "ho_\(holds.count + writes.count)"
-    holds[id] = Hold(feature: feature, amount: amount)
-    held[feature, default: 0] += amount
     let ttl = int(body["ttlSeconds"]) == 0 ? 300 : int(body["ttlSeconds"])
+    let expiresAt = clock().addingTimeInterval(TimeInterval(ttl))
+    holds[id] = Hold(feature: feature, amount: amount, expiresAt: expiresAt)
+    held[feature, default: 0] += amount
     return (
       200,
       tracked(
         feature, outcome: "HELD", amount: amount, change: amount, hold: id,
-        expiresAtMs: (Int64(Date().timeIntervalSince1970) + ttl) * 1000)
+        expiresAtMs: Int64(expiresAt.timeIntervalSince1970 * 1000))
     )
+  }
+
+  private mutating func expireHolds() {
+    let now = clock()
+    for (id, hold) in holds where hold.expiresAt <= now {
+      holds[id] = nil
+      held[hold.feature, default: 0] -= hold.amount
+    }
   }
 
   private mutating func close(_ id: String, settling amount: Int64?) -> (Int, Data) {
@@ -225,9 +244,11 @@ struct FakeState {
       FakeWrite(
         method: amount == nil ? "releaseUsage" : "settleUsage", target: id, amount: amount,
         idempotencyKey: nil))
-    guard let hold = holds.removeValue(forKey: id) else {
+    guard let hold = holds[id] else {
       return refused(409, "FailedPrecondition", "HOLD_EXPIRED")
     }
+    guard (amount ?? 0) <= hold.amount else { return refused(400, "InvalidArgument", nil) }
+    holds[id] = nil
     held[hold.feature, default: 0] -= hold.amount
     used[hold.feature, default: 0] += amount ?? 0
     return (
@@ -279,7 +300,7 @@ struct FakeState {
 
   private func context(_ fields: [String: Any]) -> [String: Any] {
     fields.merging(
-      ["asOf": Int64(Date().timeIntervalSince1970), "customer": ["externalId": id]]
+      ["asOf": Int64(clock().timeIntervalSince1970), "customer": ["externalId": id]]
     ) { first, _ in first }
   }
 
@@ -329,10 +350,10 @@ private func json(_ object: [String: Any]) -> Data {
   (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
 }
 
-private func errorObject(_ code: String, _ reason: String) -> [String: Any] {
-  ["error": ["code": code, "reason": reason, "parameters": [String: String]()]]
+private func errorObject(_ code: String, _ reason: String?) -> [String: Any] {
+  ["error": ["code": code, "reason": reason as Any? ?? NSNull(), "parameters": [String: String]()]]
 }
 
-private func refused(_ status: Int, _ code: String, _ reason: String) -> (Int, Data) {
+private func refused(_ status: Int, _ code: String, _ reason: String?) -> (Int, Data) {
   (status, json(errorObject(code, reason)))
 }
