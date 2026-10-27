@@ -111,7 +111,7 @@ extension Customer {
     if let ttlSeconds, !(60...2_592_000).contains(ttlSeconds) {
       throw ArgumentError(message: Messages.snapshotLifetime)
     }
-    var request = try Wire.snapshotsCreateSnapshot.request(["customer.external_id": id])
+    var request = try Wire.snapshotsCreateSnapshot.request(["external_id": id])
     request.body = try JSONEncoder().encode(ttlSeconds.map { ["lifetimeSeconds": $0] } ?? [:])
     request.retryable = true
     request.timeout = timeout
