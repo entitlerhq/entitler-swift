@@ -366,7 +366,16 @@ extension Customer {
     if answer.outcome == .refused {
       throw EntitlerError.usageRefused(UsageRefusedError(result: answer))
     }
-    guard let id = answer.holdID, !id.trimmed.isEmpty, let expiresAt = answer.expiresAt,
+    let id = answer.holdID.flatMap {
+      $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+    }
+    if answer.outcome == .held, id == nil || answer.expiresAt == nil {
+      throw EntitlerError.api(
+        APIError(
+          status: 200, code: grpcCode(status: 500), reason: .responseInvalid, parameters: [:],
+          requestID: nil, retryAfter: nil, idempotencyKey: key))
+    }
+    guard let id, let expiresAt = answer.expiresAt,
       answer.outcome == .held || (answer.outcome == .duplicate && expiresAt > answer.asOf)
     else { throw EntitlerError.usageReplayed(UsageReplayedError(result: answer)) }
     return Hold(
