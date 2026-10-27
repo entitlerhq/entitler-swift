@@ -134,7 +134,7 @@ public final class Hold: Sendable {
   /// True when another caller holds the same key and may be doing the same work, so the app can
   /// wait for that caller's result instead of doing the work twice.
   public let isDuplicate: Bool
-  let customer: Customer
+  let customer: any Customer
   let feature: String
   let key: String
   let timeout: TimeInterval?
@@ -142,7 +142,7 @@ public final class Hold: Sendable {
   private let ending = LockedValue<Task<UsageResult, any Error>?>(nil)
 
   init(
-    id: String, expiresAt: Date, result: UsageResult, isDuplicate: Bool, customer: Customer,
+    id: String, expiresAt: Date, result: UsageResult, isDuplicate: Bool, customer: any Customer,
     feature: String, key: String, timeout: TimeInterval?
   ) {
     self.id = id
