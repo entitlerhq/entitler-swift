@@ -106,6 +106,8 @@ let cachedFor60 = ["Cache-Control": "private, max-age=60"]
       try await server.customer("ada").pricing(locale: Locale(identifier: "e"))
     }
     #expect(api.requests.isEmpty)
+    #expect(throws: ArgumentError.self) { try languageTag(Locale(identifier: "en_a")) }
+    #expect(throws: ArgumentError.self) { try languageTag(Locale(identifier: "en-US-x")) }
     #expect(try languageTag(Locale(identifier: "sr_Latn_RS")) == "sr-Latn-RS")
     #expect(try languageTag(Locale(identifier: "en_AU@calendar=gregorian")) == "en-AU")
   }
