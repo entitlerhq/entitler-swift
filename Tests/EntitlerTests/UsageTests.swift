@@ -112,6 +112,21 @@ func body(_ request: URLRequest) -> [String: Any] {
     }
   }
 
+  @Test func aDuplicateIsAnotherCallersHoldUnlessOurOwnRetryMetIt() async throws {
+    let first = FakeAPI([Answer(body: usage("DUPLICATE", holdID: "ho_1"))])
+    let theirs = try await first.server().customer("ada").startHold(
+      of: aiCredits, amount: 500, idempotencyKey: "m-1")
+    #expect(theirs.isDuplicate)
+
+    let retried = FakeAPI([
+      Answer(status: 503, body: refusal("Unavailable", nil)),
+      Answer(body: usage("DUPLICATE", holdID: "ho_1")),
+    ])
+    let ours = try await retried.server().customer("ada").startHold(
+      of: aiCredits, amount: 500, idempotencyKey: "m-1")
+    #expect(!ours.isDuplicate)
+  }
+
   @Test func withHoldSettlesWhatTheWorkUsedAndRecordsTheExcess() async throws {
     let api = FakeAPI([
       Answer(body: usage("HELD", holdID: "ho_1")),
