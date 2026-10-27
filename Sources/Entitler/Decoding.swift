@@ -275,10 +275,6 @@ func decodeToken(_ body: Data) throws -> CustomerToken {
     token: answer.token,
     id: answer.tokenId,
     customerID: answer.customerId,
-    scopes: answer.scopes.map { scope in
-      var name = shortName(scope, prefix: "CUSTOMER_TOKEN_SCOPE_")
-      if let split = name.lastIndex(of: "_") { name.replaceSubrange(split...split, with: ":") }
-      return CustomerTokenScope(rawValue: name)
-    },
+    scopes: answer.scopes.map(CustomerTokenScope.init(wireName:)),
     expiresAt: date(answer.expiresAt))
 }

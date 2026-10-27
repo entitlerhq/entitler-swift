@@ -90,6 +90,22 @@ let customerRecordJSON = #"""
     #expect(!String(reflecting: token).contains("ctk_secret"))
   }
 
+  @Test func aScopeThisSDKDoesNotListRoundTripsUnchanged() async throws {
+    let unlisted = "CUSTOMER_TOKEN_SCOPE_REPORTS_READ_ONLY"
+    let api = FakeAPI([
+      Answer(
+        body: #"""
+          {"token": "ctk_1", "tokenId": "tk_1", "expiresAt": 1790003600,
+            "scopes": ["\#(unlisted)"]}
+          """#)
+    ])
+    let token = try await api.server().customer("ada").token(
+      scopes: [CustomerTokenScope(rawValue: unlisted)])
+
+    #expect(body(try #require(api.requests.first))["scopes"] as? [String] == [unlisted])
+    #expect(token.scopes == [CustomerTokenScope(rawValue: unlisted)])
+  }
+
   @Test func aTokenLifetimeOutsideTheAPIsBoundsIsRefused() async throws {
     let api = FakeAPI([])
     let ada = try api.server().customer("ada")
