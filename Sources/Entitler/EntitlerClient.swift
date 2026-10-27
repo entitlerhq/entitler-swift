@@ -130,7 +130,7 @@ public final class EntitlerClient: Sendable, CustomStringConvertible, CustomRefl
   /// sign-in provider doesn't let people register themselves.
   @discardableResult
   public func register(timeout: TimeInterval? = nil) async throws -> RegisteredCustomer {
-    var request = try Wire.customersRegisterCustomer.request(["customer.external_id": me.id])
+    var request = try Wire.customersRegisterCustomer.request(["external_id": me.id])
     request.body = Data("{}".utf8)
     request.timeout = timeout
     return try await core.call(request, decode: decodeRegistered).answer

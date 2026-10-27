@@ -194,7 +194,7 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
     _ route: Route, _ body: Body?, _ timeout: TimeInterval?, retryable: Bool? = nil,
     _ decode: @escaping @Sendable (Data) throws -> Answer
   ) async throws -> Answer {
-    var request = try route.request(["customer.external_id": id, "external_id": id])
+    var request = try route.request(["external_id": id])
     request.body = try body.map { try JSONEncoder().encode($0) }
     request.retryable = retryable
     request.timeout = timeout

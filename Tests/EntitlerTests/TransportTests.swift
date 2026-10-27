@@ -173,7 +173,7 @@ import Testing
     ])
     let server = try api.server(cache: store)
     let request = try Wire.entitlementsCheckFeature.request([
-      "customer.external_id": "ada", "feature_key": "priority_support",
+      "external_id": "ada", "feature_key": "priority_support",
     ])
     _ = try await server.customer("ada").check("priority_support")
     let revalidated = try await server.customer("ada").check("priority_support")
@@ -189,7 +189,7 @@ import Testing
     let api = FakeAPI([Answer(body: switchCheck)])
     let server = try api.server(cache: store)
     let request = try Wire.entitlementsCheckFeature.request([
-      "customer.external_id": "ada", "feature_key": "priority_support",
+      "external_id": "ada", "feature_key": "priority_support",
     ])
     await store.setEntry(
       CacheEntry(
@@ -214,7 +214,7 @@ import Testing
 
   @Test func theCacheKeyHoldsNoCredential() throws {
     let server = try FakeAPI([]).server()
-    let request = try Wire.entitlementsListEntitlements.request(["customer.external_id": "ada"])
+    let request = try Wire.entitlementsListEntitlements.request(["external_id": "ada"])
     let key = server.core.cacheKey(request, credential: "test-secret-key")
     #expect(key.count == 64)
     #expect(!key.contains("test-secret-key"))
