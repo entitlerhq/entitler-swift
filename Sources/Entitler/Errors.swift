@@ -35,13 +35,13 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     }
   }
 
-  /// True when Entitler could not be reached: no answer, a timeout, a `429`, a `5xx` or an answer
+  /// True when Entitler could not be reached: no answer, a timeout, a `408`, a `429`, a `5xx` or an answer
   /// this SDK cannot read. An app that can work offline falls back to its last known answer.
   public var isUnreachable: Bool {
     switch self {
     case .connection, .timeout: true
     case .api(let error):
-      error.status == 429 || error.status >= 500 || error.reason == .responseInvalid
+      [408, 429].contains(error.status) || error.status >= 500 || error.reason == .responseInvalid
     }
   }
 
