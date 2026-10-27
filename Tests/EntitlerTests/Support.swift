@@ -63,7 +63,7 @@ let switchCheck = #"""
     "entitlement": {
       "featureKey": "priority_support",
       "kind": "ENTITLED_FEATURE_KIND_SWITCH",
-      "entitled": true,
+      "entitled": true, "decimals": 0, "currency": "",
       "value": {"switch": true},
       "sources": [
         {"plan": {"planId": "pl_1", "planKey": "pro", "planName": "Pro", "productId": "pr_1",
@@ -87,7 +87,7 @@ let meteredCheck = #"""
     "entitlement": {
       "featureKey": "ai_credits",
       "kind": "ENTITLED_FEATURE_KIND_METERED",
-      "entitled": true,
+      "entitled": true, "decimals": 0, "currency": "",
       "value": {"metered": {"count": 1000}},
       "sources": [],
       "upgrades": [],
@@ -102,11 +102,11 @@ let entitlementList = #"""
     "customer": {"externalId": "ada"},
     "served": {"changeId": "ch_1"},
     "entitlements": [
-      {"featureKey": "priority_support", "kind": "ENTITLED_FEATURE_KIND_SWITCH", "entitled": true,
+      {"featureKey": "priority_support", "kind": "ENTITLED_FEATURE_KIND_SWITCH", "entitled": true, "decimals": 0, "currency": "",
         "value": {"switch": true}, "sources": [], "upgrades": []},
-      {"featureKey": "seats", "kind": "ENTITLED_FEATURE_KIND_CONFIGURATION", "entitled": true,
+      {"featureKey": "seats", "kind": "ENTITLED_FEATURE_KIND_CONFIGURATION", "entitled": true, "decimals": 0, "currency": "",
         "value": {"configuration": {"unlimited": {}}}, "sources": [], "upgrades": []},
-      {"featureKey": "collaboration", "kind": "ENTITLED_FEATURE_KIND_GROUP", "entitled": false,
+      {"featureKey": "collaboration", "kind": "ENTITLED_FEATURE_KIND_GROUP", "entitled": false, "decimals": 0, "currency": "",
         "value": {"group": {"members": []}}, "sources": [{"group": {"featureKeys": ["seats"]}}], "upgrades": []}
     ]
   }
