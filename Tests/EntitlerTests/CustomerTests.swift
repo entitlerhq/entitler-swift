@@ -3,6 +3,10 @@ import Testing
 
 @testable import Entitler
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 let customerRecordJSON = #"""
   {"id": "cu_1", "projectId": "pj_1", "environmentId": "en_1", "externalId": "ada",
     "name": "Ada", "email": "ada@example.com",
