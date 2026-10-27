@@ -388,6 +388,10 @@ extension Customer {
   /// whole hold when it reported nothing. When `work` throws or is cancelled, settles what it
   /// reported, or frees the hold when it reported nothing, then rethrows.
   ///
+  /// `work` receives the hold. When ``Hold/isDuplicate`` is true, another caller holds the same key
+  /// and is doing the same work, so that caller settles the hold: `withHold` neither settles nor
+  /// frees it, and `work` can return early to wait for the other caller's result.
+  ///
   /// ```swift
   /// let summary = try await customer.withHold(
   ///   of: aiCredits, amount: 500, idempotencyKey: "summary-\(jobID)"
@@ -419,6 +423,10 @@ extension Customer {
     let hold = try await startHold(
       of: feature, amount: amount, idempotencyKey: idempotencyKey, ttlSeconds: ttlSeconds,
       timeout: timeout)
+    if hold.isDuplicate {
+      try Task.checkCancellation()
+      return try await work(hold)
+    }
     let result: Result
     do {
       try Task.checkCancellation()
