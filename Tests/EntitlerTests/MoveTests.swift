@@ -63,11 +63,8 @@ let doneMove = #"""
     #expect(result.change?.plan?.key == "team")
     #expect(result.change?.effective.rawValue == "now")
     #expect(result.change?.policy.rawValue == "upgrade")
-    #expect(
-      pay
-        == .pay(
-          url: try #require(URL(string: "https://pay.example.com/c/1")),
-          status: OpenName(rawValue: "checkout")))
+    let checkout = try #require(URL(string: "https://pay.example.com/c/1"))
+    #expect(pay == .pay(url: checkout, status: OpenName(rawValue: "checkout")))
     #expect(confirming == .confirming)
     #expect(api.requests.first?.url?.path == "/v1/customers/me/subscription")
   }
