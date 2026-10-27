@@ -1,6 +1,9 @@
 import Foundation
 
 let operations = [
+  "Billing.CreatePortalSession",
+  "Billing.GetBilling",
+  "Billing.SyncBilling",
   "CustomerTokens.CreateToken",
   "CustomerTracks.AssignTrack",
   "Customers.EraseCustomer",
@@ -19,6 +22,7 @@ let operations = [
   "Subscriptions.CancelPendingChange",
   "Subscriptions.CancelSubscription",
   "Subscriptions.ChooseSubscription",
+  "Subscriptions.ListAvailablePlans",
   "Subscriptions.RemoveAddOn",
   "Subscriptions.SetAddOn",
   "Subscriptions.SetPlan",
