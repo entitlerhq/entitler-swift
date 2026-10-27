@@ -35,7 +35,9 @@ func snapshotVectors() throws -> [SnapshotVector] {
   let file = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
   let keys = try JSONDecoder().decode(
     SnapshotKeySet.self, from: JSONSerialization.data(withJSONObject: field(file, "keys") as Any))
-  return try (field(file, "vectors") as [Any]).map { vector in
+  let vectors: [Any] = try field(file, "vectors")
+  guard !vectors.isEmpty else { throw MalformedVectors(field: "vectors") }
+  return try vectors.map { vector in
     let expected: Any = try field(vector, "expected")
     guard let now = isoFormatter().date(from: try field(expected, "now")) else {
       throw MalformedVectors(field: "now")
@@ -43,7 +45,9 @@ func snapshotVectors() throws -> [SnapshotVector] {
     return SnapshotVector(
       name: try field(vector, "name"), token: try field(vector, "token"), keys: keys,
       customer: try field(expected, "customer"), environment: try field(expected, "environment"),
-      now: now, clockSkewSeconds: try? field(expected, "clockSkewSeconds"),
+      now: now,
+      clockSkewSeconds: (expected as? [String: Any])?["clockSkewSeconds"] == nil
+        ? nil : try field(expected, "clockSkewSeconds") as Int,
       outcome: try canonical(field(vector, "outcome") as Any))
   }
 }
