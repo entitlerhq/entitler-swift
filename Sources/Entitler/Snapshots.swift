@@ -271,7 +271,7 @@ private enum ClaimValue: Decodable {
   case on(Bool)
   case amount(Int64)
   case unlimited
-  case members
+  case list(markets: [String: Limit]?)
   case other
 
   init(from decoder: any Decoder) throws {
@@ -282,8 +282,15 @@ private enum ClaimValue: Decodable {
       self = .amount(amount)
     } else if (try? value.decode(String.self)) == "unlimited" {
       self = .unlimited
+    } else if let markets = try? value.decode([MarketClaim].self) {
+      self = .list(
+        markets: Dictionary(
+          markets.compactMap { claim in claim.limit.limit.map { (claim.marketId, $0) } }
+        ) {
+          _, last in last
+        })
     } else if (try? value.decode([ClaimValue].self)) != nil {
-      self = .members
+      self = .list(markets: nil)
     } else {
       self = .other
     }
@@ -297,15 +304,25 @@ private enum ClaimValue: Decodable {
     }
   }
 
-  func feature(entitled: Bool) -> FeatureValue {
+  func feature(entitled: Bool, type: FeatureType) -> FeatureValue {
     switch self {
     case .on(let on): on ? .on : .amount(0)
     case .amount(let amount): .amount(amount)
     case .unlimited: .unlimited
-    case .members: entitled ? .on : .amount(0)
+    case .list: type == .group && entitled ? .on : .amount(0)
     case .other: .amount(0)
     }
   }
+
+  func markets(type: FeatureType) -> [String: Limit]? {
+    guard type != .group, case .list(let markets) = self else { return nil }
+    return markets ?? [:]
+  }
+}
+
+private struct MarketClaim: Decodable {
+  let marketId: String
+  let limit: ClaimValue
 }
 
 private struct ClaimEntitlement: Decodable {
@@ -326,9 +343,10 @@ private struct ClaimEntitlement: Decodable {
     let type = FeatureType(rawValue: kind)
     return Entitlement(
       key: key, type: type, entitled: entitled,
-      value: value?.feature(entitled: entitled) ?? .amount(0), markets: nil,
+      value: value?.feature(entitled: entitled, type: type) ?? .amount(0),
+      markets: value?.markets(type: type),
       decimals: decimals ?? 0, currency: currency.flatMap { $0.isEmpty ? nil : $0 },
-      sources: (sources ?? []).compactMap(\.source), upgrades: [],
+      sources: (sources ?? []).compactMap { $0.source(of: type) }, upgrades: [],
       meter: type == .metered
         ? Meter(
           used: used ?? 0, held: held ?? 0, banked: banked ?? 0,
@@ -355,8 +373,9 @@ private struct ClaimSource: Decodable {
   let until: Int64?
   let features: [String]?
 
-  var source: EntitlementSource? {
-    let value = value?.feature(entitled: true)
+  func source(of feature: FeatureType) -> EntitlementSource? {
+    let markets = value?.markets(type: feature)
+    let value = value?.feature(entitled: true, type: feature)
     let through = through.flatMap { $0.isEmpty ? nil : $0 }
     switch type {
     case "plan", "default_plan":
@@ -365,18 +384,19 @@ private struct ClaimSource: Decodable {
       return .plan(
         PlanSource(
           planID: plan.id, plan: plan.key, name: plan.name, product: product, version: version,
-          byDefault: byDefault, value: byDefault ? nil : value, markets: nil, through: through))
-    case "addon":
+          byDefault: byDefault, value: byDefault ? nil : value,
+          markets: byDefault ? nil : markets, through: through))
+    case "add_on":
       guard let plan, let version, let quantity else { return nil }
       return .addOn(
         AddOnSource(
           planID: plan.id, plan: plan.key, name: plan.name, version: version, quantity: quantity,
-          value: value, markets: nil, through: through))
+          value: value, markets: markets, through: through))
     case "grant":
       guard let grant else { return nil }
       return .grant(
         GrantSource(
-          grant: grant, until: until.map(date), value: value, markets: nil, through: through))
+          grant: grant, until: until.map(date), value: value, markets: markets, through: through))
     case "group":
       return .group(features: features ?? [])
     default:
