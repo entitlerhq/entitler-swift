@@ -29,7 +29,7 @@ func validTimeout(_ timeout: TimeInterval) throws -> TimeInterval {
   return timeout
 }
 
-typealias Exchange = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
+package typealias Exchange = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
 struct Request: Sendable {
   var method: String

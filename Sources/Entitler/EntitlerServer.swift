@@ -36,6 +36,12 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
       options: options, cache: cache, credentials: .key(key), exchange: exchange, hooks: hooks)
   }
 
+  package convenience init(key: String, options: EntitlerOptions, exchange: @escaping Exchange)
+    throws
+  {
+    try self.init(key: key, cache: nil, options: options, exchange: exchange, hooks: Hooks())
+  }
+
   /// The customer with the id your app uses for them. Makes no request.
   ///
   /// - Throws: ``ArgumentError`` for a blank id, or for `me`, which names an app's signed-in

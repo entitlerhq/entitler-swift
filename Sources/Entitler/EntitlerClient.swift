@@ -114,6 +114,14 @@ public final class EntitlerClient: Sendable, CustomStringConvertible, CustomRefl
       credentials: provided(identityTokenProvider, key: key))
   }
 
+  package convenience init(token: String, options: EntitlerOptions, exchange: @escaping Exchange)
+    throws
+  {
+    try self.init(kind: .token, cache: nil, options: options, exchange: exchange, hooks: Hooks()) {
+      _, _ in Credentials(authorise: { signed(token, key: nil) })
+    }
+  }
+
   init(
     kind: ClientKind, cache: MemoryCacheStore?, options: EntitlerOptions, exchange: Exchange?,
     hooks: Hooks, credentials: (Hooks, TimeInterval) -> Credentials
