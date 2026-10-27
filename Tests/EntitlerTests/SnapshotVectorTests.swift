@@ -6,6 +6,7 @@ import Testing
 struct SnapshotVector: Sendable, CustomTestStringConvertible {
   let name: String
   let token: String
+  let keys: SnapshotKeySet
   let customer: String
   let environment: String
   let now: Date
@@ -15,24 +16,37 @@ struct SnapshotVector: Sendable, CustomTestStringConvertible {
   var testDescription: String { name }
 }
 
-let vectorFile: (keys: SnapshotKeySet, vectors: [SnapshotVector]) = {
-  let url = Bundle.module.url(
-    forResource: "snapshot-vectors", withExtension: "json", subdirectory: "Fixtures")!
-  let data = try! Data(contentsOf: url)
-  let file = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
-  let keys = try! JSONDecoder().decode(
-    SnapshotKeySet.self, from: JSONSerialization.data(withJSONObject: file["keys"]!))
-  let vectors = (file["vectors"] as! [[String: Any]]).map { vector in
-    let expected = vector["expected"] as! [String: Any]
-    return SnapshotVector(
-      name: vector["name"] as! String, token: vector["token"] as! String,
-      customer: expected["customer"] as! String, environment: expected["environment"] as! String,
-      now: isoFormatter().date(from: expected["now"] as! String)!,
-      clockSkewSeconds: expected["clockSkewSeconds"] as? Int,
-      outcome: canonical(vector["outcome"]!))
+struct MalformedVectors: Error {
+  let field: String
+}
+
+func field<Value>(_ object: Any?, _ name: String) throws -> Value {
+  guard let value = (object as? [String: Any])?[name] as? Value else {
+    throw MalformedVectors(field: name)
   }
-  return (keys, vectors)
-}()
+  return value
+}
+
+func snapshotVectors() throws -> [SnapshotVector] {
+  guard
+    let url = Bundle.module.url(
+      forResource: "snapshot-vectors", withExtension: "json", subdirectory: "Fixtures")
+  else { throw MalformedVectors(field: "file") }
+  let file = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+  let keys = try JSONDecoder().decode(
+    SnapshotKeySet.self, from: JSONSerialization.data(withJSONObject: field(file, "keys") as Any))
+  return try (field(file, "vectors") as [Any]).map { vector in
+    let expected: Any = try field(vector, "expected")
+    guard let now = isoFormatter().date(from: try field(expected, "now")) else {
+      throw MalformedVectors(field: "now")
+    }
+    return SnapshotVector(
+      name: try field(vector, "name"), token: try field(vector, "token"), keys: keys,
+      customer: try field(expected, "customer"), environment: try field(expected, "environment"),
+      now: now, clockSkewSeconds: try? field(expected, "clockSkewSeconds"),
+      outcome: try canonical(field(vector, "outcome") as Any))
+  }
+}
 
 func isoFormatter() -> ISO8601DateFormatter {
   let formatter = ISO8601DateFormatter()
@@ -44,19 +58,19 @@ func iso(_ date: Date?) -> Any {
   date.map { isoFormatter().string(from: $0) } ?? NSNull()
 }
 
-func canonical(_ json: Any) -> String {
+func canonical(_ json: Any) throws -> String {
   String(
-    decoding: try! JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
+    decoding: try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
     as: UTF8.self)
 }
 
 @Suite struct SnapshotVectorTests {
-  @Test(arguments: vectorFile.vectors)
-  func theSharedVectorsVerifyAsEveryEntitlerSDKDoes(_ vector: SnapshotVector) {
+  @Test(arguments: try snapshotVectors())
+  func theSharedVectorsVerifyAsEveryEntitlerSDKDoes(_ vector: SnapshotVector) throws {
     var outcome: Any
     do {
       let snapshot = try verifySnapshot(
-        vector.token, keys: vectorFile.keys, customer: vector.customer,
+        vector.token, keys: vector.keys, customer: vector.customer,
         environment: vector.environment, now: vector.now,
         clockSkewSeconds: vector.clockSkewSeconds ?? 60)
       outcome = ["snapshot": json(snapshot)]
@@ -65,7 +79,7 @@ func canonical(_ json: Any) -> String {
     } catch {
       outcome = ["error": "\(error)"]
     }
-    #expect(canonical(outcome) == vector.outcome)
+    #expect(try canonical(outcome) == vector.outcome)
   }
 }
 
