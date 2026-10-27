@@ -6,6 +6,8 @@
 - Document every public declaration. Write no other comments: rename or restructure instead.
 - Never log, print or put in an error any key, token, or request or response body.
 - Never commit secrets.
+- `Tests/EntitlerTests/Fixtures/snapshot-vectors.json` is shared by every Entitler SDK. Copy it
+  unchanged from `entitlerhq/entitler-typescript`; never edit it here.
 
 ## Pull requests
 
