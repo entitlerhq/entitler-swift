@@ -3,7 +3,8 @@ import Foundation
 let operations = [
   "CustomerTokens.CreateToken", "Customers.EraseCustomer", "Customers.GetCustomer",
   "Customers.RegisterCustomer", "Customers.UpdateCustomer", "Entitlements.CheckFeature",
-  "Entitlements.ListEntitlements", "SnapshotKeys", "Snapshots.CreateSnapshot", "Usage.CreateHold",
+  "Entitlements.ListEntitlements", "Pricing.GetCustomerPricing", "Pricing.GetPricing",
+  "SnapshotKeys", "Snapshots.CreateSnapshot", "Usage.CreateHold",
   "Usage.ReleaseHold", "Usage.ReportUsage",
   "Usage.SettleHold",
 ]

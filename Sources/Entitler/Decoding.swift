@@ -34,20 +34,20 @@ private let featureTypes: [String: FeatureType] = [
   "ENTITLED_FEATURE_KIND_GROUP": .group,
 ]
 
-private func shortName(_ name: String, prefix: String) -> String {
+func shortName(_ name: String, prefix: String) -> String {
   guard name.hasPrefix(prefix) else { return name }
   return String(name.dropFirst(prefix.count)).lowercased()
 }
 
-private func openName(_ name: String, prefix: String) -> OpenName {
+func openName(_ name: String, prefix: String) -> OpenName {
   OpenName(rawValue: shortName(name, prefix: prefix))
 }
 
-private func limit(_ value: Wire.Limit) -> Limit {
+func limit(_ value: Wire.Limit) -> Limit {
   value.unlimited != nil ? .unlimited : .amount(value.count ?? 0)
 }
 
-private func featureValue(_ value: Wire.FeatureValue?, entitled: Bool) throws -> FeatureValue {
+func featureValue(_ value: Wire.FeatureValue?, entitled: Bool) throws -> FeatureValue {
   guard let value else { return .amount(0) }
   if let on = value.switch { return on ? .on : .amount(0) }
   if let metered = value.metered { return amount(limit(metered)) }
@@ -58,7 +58,7 @@ private func featureValue(_ value: Wire.FeatureValue?, entitled: Bool) throws ->
   return .amount(0)
 }
 
-private func markets(_ value: Wire.FeatureValue?) -> [String: Limit]? {
+func markets(_ value: Wire.FeatureValue?) -> [String: Limit]? {
   value?.money.map { money in
     Dictionary(
       money.limits.map { ($0.marketId, limit($0.limit ?? Wire.Limit(count: 0))) }
@@ -181,7 +181,7 @@ private func entitlement(_ value: Wire.Entitlement) throws -> Entitlement {
     meter: value.meter.map(meter))
 }
 
-private func served(_ value: Wire.ServedCatalogue?) throws -> Served {
+func served(_ value: Wire.ServedCatalogue?) throws -> Served {
   let track = value?.track.map { ServedTrack(id: $0.id, name: $0.name) }
   let source: ServedSource
   if let release = value?.release {
