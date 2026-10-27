@@ -266,11 +266,7 @@ final class Core: Sendable, CustomReflectable {
   ) async throws -> (answer: Answer, retried: Bool) {
     _ = try request.timeout.map(validTimeout)
     return try await guarded { [self] in
-      let auth = try await authorise(request)
-      let response = try await send(request, auth: auth)
-      if request.method != "GET", let cache {
-        await renewGeneration(request, credential: (response.refreshed ?? auth).credential, cache)
-      }
+      let response = try await send(request, auth: authorise(request))
       return (
         try decoded(response, decode, idempotencyKey: request.idempotencyKey), response.retried
       )
@@ -430,6 +426,11 @@ final class Core: Sendable, CustomReflectable {
     return await renewGeneration(request, credential: credential, cache)
   }
 
+  private func mayHaveChanged(_ request: Request, credential: String) async {
+    guard request.method != "GET", let cache else { return }
+    await renewGeneration(request, credential: credential, cache)
+  }
+
   @discardableResult
   private func renewGeneration(_ request: Request, credential: String, _ cache: any CacheStore)
     async -> String?
@@ -494,6 +495,9 @@ final class Core: Sendable, CustomReflectable {
           await state.reachable()
           response.retried = retries > 0
           if refreshed { response.refreshed = current }
+          if http.statusCode != 304 {
+            await mayHaveChanged(request, credential: current.credential)
+          }
           return response
         }
         let error = apiError(
@@ -519,6 +523,7 @@ final class Core: Sendable, CustomReflectable {
       } catch let error as EntitlerError {
         switch error {
         case .connection, .timeout:
+          await mayHaveChanged(request, credential: current.credential)
           guard request.isRetryable else { throw error }
           failure = error
         default: throw error
