@@ -128,6 +128,27 @@ import Testing
     }
   }
 
+  @Test func anEntitlementWithoutAFeatureKeyIsResponseInvalid() async throws {
+    let api = FakeAPI([
+      Answer(
+        body: #"""
+          {"asOf": 1790000000, "customer": {"externalId": "ada"}, "entitlement": {"entitled": true,
+            "kind": "ENTITLED_FEATURE_KIND_SWITCH", "sources": [], "upgrades": []}}
+          """#)
+    ])
+    do {
+      _ = try await api.server().customer("ada").check("priority_support")
+      Issue.record("Expected a failure.")
+    } catch EntitlerError.api(let error) {
+      #expect(error.reason == .responseInvalid)
+      guard case .keyNotFound(let key, _)? = error.underlyingError as? DecodingError else {
+        Issue.record("Expected a missing key.")
+        return
+      }
+      #expect(key.stringValue == "featureKey")
+    }
+  }
+
   @Test func isEntitledAnswersTheFallbackAndReportsTheFailure() async throws {
     let reported = LockedValue<[String]>([])
     let api = FakeAPI([Answer(status: 404, body: refusal("NotFound", "CUSTOMER_NOT_FOUND"))])

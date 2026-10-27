@@ -141,6 +141,19 @@ import Testing
     #expect(stale.stale)
   }
 
+  @Test func aRequestTimeoutCountsAsUnreachable() async throws {
+    let api = FakeAPI([
+      Answer(
+        headers: ["ETag": "W/\"v1\"", "Cache-Control": "private, no-cache"], body: switchCheck),
+      Answer(status: 408, body: refusal("DeadlineExceeded", nil)),
+    ])
+    let customer = try api.server(options: EntitlerOptions(maxRetries: 0)).customer("ada")
+    _ = try await customer.check("priority_support")
+    let stale = try await customer.check("priority_support")
+
+    #expect(stale.stale)
+  }
+
   @Test func aDirectiveThatOnlyStartsWithNoStoreKeepsTheAnswer() async throws {
     let api = FakeAPI([
       Answer(headers: ["Cache-Control": "private, max-age=60, no-store-ish"], body: switchCheck)
