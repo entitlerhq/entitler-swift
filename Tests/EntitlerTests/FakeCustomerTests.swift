@@ -155,7 +155,9 @@ import Testing
   @Test func usageOfAFeatureThatIsNotMeteredOrHasNoAllowanceIsRefused() async throws {
     let fake = try FakeCustomer(["export_pdf": true, "ai_credits": .metered(limit: 0)])
     let refused = try await fake.customer.recordUsage(
-      of: aiCredits, amount: 1, idempotencyKey: "m-1")
+      of: aiCredits, amount: 1, idempotencyKey: "m-1", mode: .observe)
+    let refusedHold = try await fake.customer.holdUsage(
+      of: aiCredits, amount: 2, idempotencyKey: "h-1")
     do {
       _ = try await fake.customer.recordUsage(of: "export_pdf", amount: 1, idempotencyKey: "m-2")
       Issue.record("Expected a feature that isn't metered.")
@@ -163,6 +165,10 @@ import Testing
       #expect(error.reason?.rawValue == "USAGE_FEATURE_NOT_METERED")
     }
     #expect(refused.refusal == .notEntitled)
+    #expect(refused.amount == 1)
+    #expect(refused.mode == .observe)
+    #expect(refusedHold.refusal == .notEntitled)
+    #expect(refusedHold.amount == 2)
   }
 }
 
