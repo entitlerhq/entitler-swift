@@ -34,8 +34,36 @@ enum Wire {
     var `endedTestHoldings`: Int64
   }
   typealias AssignmentSource = String
+  struct BilledPlan: Decodable, Sendable {
+    var `billingConnectionId`: String?
+    var `cohortId`: String?
+    var `periodId`: String?
+    var `planId`: String
+    var `since`: Int64
+    var `versionNumber`: Int64
+  }
+  struct CancelPendingAddOnChangeResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
+  }
+  struct CancelPendingChangeResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
+  }
   struct CancelReportResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
+  }
+  struct CancelSubscriptionResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
+  }
+  struct Cancellation: Decodable, Sendable {
+    var `chargedBack`: Amount?
+    var `endsAt`: Int64
+    var `exitFee`: Amount?
   }
   struct CheckFeatureResponse: Decodable, Sendable {
     var `asOf`: Int64
@@ -43,6 +71,11 @@ enum Wire {
     var `entitlement`: Entitlement?
     var `nextChangeAt`: Int64?
     var `served`: ServedCatalogue?
+  }
+  struct ChooseSubscriptionResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
   }
   typealias ConnectionMode = String
   struct CreateGrantResponse: Decodable, Sendable {
@@ -127,6 +160,8 @@ enum Wire {
     var `throughFeatureKey`: String?
     var `versionNumber`: Int64
   }
+  typealias DiscountGivenBy = String
+  typealias Effective = String
   struct EntitledCustomer: Decodable, Sendable {
     var `customerId`: String?
     var `externalId`: String
@@ -221,6 +256,84 @@ enum Wire {
   struct GroupValue: Decodable, Sendable {
     var `members`: [GroupMember]
   }
+  struct HeldAddOn: Decodable, Sendable {
+    var `addedAt`: Int64
+    var `billingConnectionId`: String?
+    var `cohortId`: String?
+    var `cohortNumber`: Int64?
+    var `lockedUntil`: Int64?
+    var `money`: CustomerMoney
+    var `movingToPlanId`: String?
+    var `planId`: String
+    var `planKey`: String
+    var `planName`: String
+    var `purchaseSource`: String?
+    var `quantity`: Int64
+    var `required`: Bool
+    var `versionNumber`: Int64
+  }
+  struct HeldDiscount: Decodable, Sendable {
+    var `amount`: Amount?
+    var `applied`: Bool
+    var `fees`: [OfferFee]
+    var `givenAt`: Int64
+    var `givenBy`: DiscountGivenBy
+    var `minimumStayMonths`: Int64?
+    var `offerId`: String
+    var `offerKey`: String
+    var `offerName`: String
+    var `percentThousandths`: Int64?
+    var `periodIds`: [String]
+    var `periodsLeft`: Int64?
+    var `planIds`: [String]
+    var `startsAt`: Int64?
+    var `until`: Int64?
+  }
+  struct HeldPlan: Decodable, Sendable {
+    var `billingConnectionId`: String?
+    var `byDefault`: Bool
+    var `cohortId`: String?
+    var `cohortNumber`: Int64?
+    var `lockedUntil`: Int64?
+    var `money`: CustomerMoney
+    var `periodId`: String?
+    var `planId`: String
+    var `planKey`: String
+    var `planName`: String
+    var `purchaseSource`: String?
+    var `versionNumber`: Int64
+  }
+  struct HeldTerm: Decodable, Sendable {
+    var `endsAt`: Int64
+    var `then`: TermThen
+  }
+  struct Holdings: Decodable, Sendable {
+    var `grants`: [Grant]
+    var `lanes`: [LaneHolding]
+  }
+  struct LaneHolding: Decodable, Sendable {
+    var `addOns`: [HeldAddOn]
+    var `billed`: BilledPlan?
+    var `cancellation`: Cancellation?
+    var `cancelsAt`: Int64?
+    var `collection`: SubscriptionCollection
+    var `contractStartedAt`: Int64?
+    var `discounts`: [HeldDiscount]
+    var `paidUntil`: Int64?
+    var `paymentAmount`: Amount?
+    var `paymentDays`: Int64?
+    var `paymentDueAt`: Int64?
+    var `pending`: PendingChange?
+    var `periodsAhead`: Int64
+    var `plan`: HeldPlan?
+    var `productId`: String?
+    var `renewsAt`: Int64?
+    var `scheduledChanges`: [ScheduledChange]
+    var `startedAt`: Int64?
+    var `term`: HeldTerm?
+    var `trialEndsAt`: Int64?
+    var `until`: Int64?
+  }
   struct Limit: Decodable, Sendable {
     var `count`: Int64?
     var `unlimited`: Unlimited?
@@ -261,6 +374,13 @@ enum Wire {
     var `resetsAt`: Int64?
     var `used`: Int64
   }
+  struct MoveResult: Decodable, Sendable {
+    var `change`: PlanChange?
+    var `customerId`: String
+    var `holdings`: Holdings?
+    var `money`: CustomerMoney
+    var `revision`: Int64
+  }
   struct NextCharge: Decodable, Sendable {
     var `amount`: Amount?
     var `at`: Int64
@@ -268,14 +388,45 @@ enum Wire {
     var `feeKey`: String
   }
   struct NothingServed: Decodable, Sendable {}
+  struct OfferFee: Decodable, Sendable {
+    var `feeKey`: String
+    var `planId`: String
+  }
   struct OnPurchase: Decodable, Sendable {}
+  struct PaymentConfirming: Decodable, Sendable {}
   typealias PaymentProvider = String
+  struct PaymentStep: Decodable, Sendable {
+    var `status`: PaymentStepStatus
+    var `url`: String
+  }
+  typealias PaymentStepStatus = String
+  struct PendingCancel: Decodable, Sendable {}
+  struct PendingChange: Decodable, Sendable {
+    var `at`: Int64
+    var `cancel`: PendingCancel?
+    var `move`: PendingPlanMove?
+  }
+  struct PendingPlanMove: Decodable, Sendable {
+    var `periodId`: String?
+    var `planId`: String
+    var `until`: Int64?
+  }
   struct PeriodPrice: Decodable, Sendable {
     var `bands`: [PricedBand]
     var `periodId`: String?
     var `price`: Amount?
   }
   typealias PeriodUnit = String
+  struct PlanChange: Decodable, Sendable {
+    var `at`: Int64
+    var `changed`: Bool
+    var `effective`: Effective
+    var `plan`: HeldPlan?
+    var `policy`: SubscriptionMovePolicy
+    var `productId`: String?
+    var `quantity`: Int64?
+    var `until`: Int64?
+  }
   struct PlanItem: Decodable, Sendable {
     var `bank`: Limit?
     var `benefitThousandths`: Int64?
@@ -379,6 +530,11 @@ enum Wire {
   struct ReleaseHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
+  struct RemoveAddOnResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
+  }
   struct ReportUsageResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
@@ -386,6 +542,15 @@ enum Wire {
     var `changed`: Bool
     var `grant`: Grant?
     var `revision`: Int64
+  }
+  struct ScheduledChange: Decodable, Sendable {
+    var `acceptanceRequired`: Bool
+    var `accepted`: Bool
+    var `amount`: Amount?
+    var `effectiveAt`: Int64
+    var `planId`: String
+    var `rolloutId`: String
+    var `versionNumber`: Int64
   }
   struct ServedCatalogue: Decodable, Sendable {
     var `changeId`: String?
@@ -401,6 +566,16 @@ enum Wire {
     var `id`: String
     var `name`: String
   }
+  struct SetAddOnResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
+  }
+  struct SetPlanResponse: Decodable, Sendable {
+    var `confirming`: PaymentConfirming?
+    var `done`: MoveResult?
+    var `pay`: PaymentStep?
+  }
   struct SettleHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
@@ -410,6 +585,8 @@ enum Wire {
   struct StripeListingIds: Decodable, Sendable {
     var `priceId`: String
   }
+  typealias SubscriptionCollection = String
+  typealias SubscriptionMovePolicy = String
   struct SubscriptionPrice: Decodable, Sendable {
     var `atRenewal`: CustomerPriceLines?
     var `nextCharges`: [NextCharge]
@@ -419,6 +596,7 @@ enum Wire {
     var `subscriptionId`: String
   }
   struct SwitchOn: Decodable, Sendable {}
+  typealias TermThen = String
   struct TrackedUsage: Decodable, Sendable {
     var `asOf`: Int64
     var `customer`: EntitledCustomer?
@@ -504,6 +682,21 @@ enum Wire {
   static let snapshotKeys = Route(method: "GET", path: "/v1/snapshot-keys", query: [])
   static let snapshotsCreateSnapshot = Route(
     method: "POST", path: "/v1/customers/{external_id}/snapshots", query: [])
+  static let subscriptionsCancelPendingAddOnChange = Route(
+    method: "POST", path: "/v1/customers/{external_id}/add-ons/{plan_key}:cancelPendingChange",
+    query: [])
+  static let subscriptionsCancelPendingChange = Route(
+    method: "POST", path: "/v1/customers/{external_id}/subscription:cancelPendingChange", query: [])
+  static let subscriptionsCancelSubscription = Route(
+    method: "POST", path: "/v1/customers/{external_id}/subscription:cancel", query: [])
+  static let subscriptionsChooseSubscription = Route(
+    method: "POST", path: "/v1/customers/{external_id}/subscription", query: [])
+  static let subscriptionsRemoveAddOn = Route(
+    method: "POST", path: "/v1/customers/{external_id}/add-ons/{plan_key}:remove", query: [])
+  static let subscriptionsSetAddOn = Route(
+    method: "PUT", path: "/v1/customers/{external_id}/add-ons/{plan_key}", query: [])
+  static let subscriptionsSetPlan = Route(
+    method: "PUT", path: "/v1/customers/{external_id}/plan", query: [])
   static let usageAdjustMeter = Route(
     method: "POST", path: "/v1/customers/{external_id}/meters/{feature_key}:adjust", query: [])
   static let usageCancelReport = Route(
