@@ -20,6 +20,35 @@ enum Wire {
   struct CreateHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
+  struct CreateTokenResponse: Decodable, Sendable {
+    var `customerId`: String?
+    var `expiresAt`: Int64
+    var `scopes`: [CustomerTokenScope]
+    var `token`: String
+    var `tokenId`: String
+  }
+  struct Customer: Decodable, Sendable {
+    var `attributes`: [CustomerAttribute]
+    var `createdAt`: Int64
+    var `email`: String?
+    var `environmentId`: String
+    var `externalId`: String
+    var `id`: String
+    var `identityProviderId`: String?
+    var `marketId`: String?
+    var `money`: CustomerMoney
+    var `name`: String?
+    var `projectId`: String
+    var `revision`: Int64
+    var `trackId`: String?
+    var `updatedAt`: Int64
+  }
+  struct CustomerAttribute: Decodable, Sendable {
+    var `key`: String
+    var `value`: String
+  }
+  typealias CustomerMoney = String
+  typealias CustomerTokenScope = String
   struct DefaultPlanSource: Decodable, Sendable {
     var `planId`: String
     var `planKey`: String
@@ -49,11 +78,17 @@ enum Wire {
     var `group`: GroupSource?
     var `plan`: PlanSource?
   }
+  struct EraseCustomerResponse: Decodable, Sendable {
+    var `erased`: Int64
+  }
   struct FeatureValue: Decodable, Sendable {
     var `configuration`: Limit?
     var `group`: GroupValue?
     var `metered`: Limit?
     var `switch`: Bool?
+  }
+  struct GetCustomerResponse: Decodable, Sendable {
+    var `customer`: Customer?
   }
   struct GrantSource: Decodable, Sendable {
     var `grantId`: String
@@ -102,6 +137,10 @@ enum Wire {
     var `value`: FeatureValue?
     var `versionNumber`: Int64
   }
+  struct RegisterCustomerResponse: Decodable, Sendable {
+    var `created`: Bool
+    var `customer`: Customer?
+  }
   struct ReleaseHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
@@ -133,6 +172,9 @@ enum Wire {
     var `usage`: UsageResult?
   }
   struct Unlimited: Decodable, Sendable {}
+  struct UpdateCustomerResponse: Decodable, Sendable {
+    var `customer`: Customer?
+  }
   struct Upgrade: Decodable, Sendable {
     var `action`: UpgradeAction
     var `kind`: UpgradeKind
@@ -163,6 +205,17 @@ enum Wire {
     var `usageId`: String?
   }
 
+  static let customerTokensCreateToken = Route(
+    method: "POST", path: "/v1/customers/{external_id}/tokens", query: [])
+  static let customersEraseCustomer = Route(
+    method: "POST", path: "/v1/customers/{external_id}:erase", query: [])
+  static let customersGetCustomer = Route(
+    method: "GET", path: "/v1/customers/{external_id}",
+    query: ["target.team_id", "target.project_id", "target.environment_id"])
+  static let customersRegisterCustomer = Route(
+    method: "PUT", path: "/v1/customers/{customer.external_id}", query: [])
+  static let customersUpdateCustomer = Route(
+    method: "PATCH", path: "/v1/customers/{external_id}", query: [])
   static let entitlementsCheckFeature = Route(
     method: "GET", path: "/v1/customers/{customer.external_id}/entitlements/{feature_key}",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])

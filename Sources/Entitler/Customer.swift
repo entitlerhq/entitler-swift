@@ -1,10 +1,20 @@
 import Foundation
 
-/// A customer, named by the id your app uses for them.
-public struct Customer: Sendable {
+/// A customer: the checks and usage both clients share.
+public protocol Customer: Sendable {
   /// The id your app uses for the customer.
-  public let id: String
+  var id: String { get }
+  /// The client this customer acts through. Opaque.
+  var handle: CustomerHandle { get }
+}
+
+/// The client a ``Customer`` acts through. Opaque.
+public struct CustomerHandle: Sendable {
   let core: Core
+}
+
+extension Customer {
+  var core: Core { handle.core }
 
   /// Checks one feature: Entitler's decision, the value, where it comes from and the plans that
   /// would give it. A metered feature's check carries its meter.

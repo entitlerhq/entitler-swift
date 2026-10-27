@@ -78,6 +78,8 @@ enum Messages {
   static let asOf = "Pass asOf as a valid date."
   static let dots = "Pass an id that is not made only of dots."
   static let timeout = "Pass timeout as a number of seconds above 0."
+  static let me = "me names the signed-in customer, which only an app's client has."
+  static let ttlToken = "Pass ttlSeconds as a whole number from 60 to 3600."
   static let hold = "Provide the id of the hold."
   static let usageAmount = "Pass amount as a whole number of 1 or more."
   static let settledAmount = "Pass amount as a whole number from 0 to the held amount."

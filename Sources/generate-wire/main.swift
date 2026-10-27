@@ -1,8 +1,10 @@
 import Foundation
 
 let operations = [
-  "Entitlements.CheckFeature", "Entitlements.ListEntitlements", "Usage.CreateHold",
-  "Usage.ReleaseHold", "Usage.ReportUsage", "Usage.SettleHold",
+  "CustomerTokens.CreateToken", "Customers.EraseCustomer", "Customers.GetCustomer",
+  "Customers.RegisterCustomer", "Customers.UpdateCustomer", "Entitlements.CheckFeature",
+  "Entitlements.ListEntitlements", "Usage.CreateHold", "Usage.ReleaseHold", "Usage.ReportUsage",
+  "Usage.SettleHold",
 ]
 let schemaPrefix = "#/components/schemas/"
 typealias Object = [String: Any]

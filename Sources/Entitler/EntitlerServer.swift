@@ -36,9 +36,12 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
 
   /// The customer with the id your app uses for them. Makes no request.
   ///
-  /// - Throws: ``ArgumentError`` for a blank id.
-  public func customer(_ id: String) throws -> Customer {
-    Customer(id: try require(id, Messages.customerID), core: core)
+  /// - Throws: ``ArgumentError`` for a blank id, or for `me`, which names an app's signed-in
+  ///   customer.
+  public func customer(_ id: String) throws -> ServerCustomer {
+    let given = try require(id, Messages.customerID)
+    guard given != "me" else { throw ArgumentError(message: Messages.me) }
+    return ServerCustomer(id: given, handle: CustomerHandle(core: core))
   }
 
   /// Closes the client: cancels every call in flight, drops the in-memory cache (a custom store is

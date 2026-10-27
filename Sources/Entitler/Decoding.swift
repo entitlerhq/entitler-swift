@@ -242,3 +242,43 @@ func decodeUsage(_ body: Data) throws -> UsageResult {
 private func milliseconds(_ value: Int64) -> Date {
   Date(timeIntervalSince1970: TimeInterval(value) / 1000)
 }
+
+private func customerRecord(_ value: Wire.Customer) -> CustomerRecord {
+  CustomerRecord(
+    customer: value.externalId,
+    customerID: value.id,
+    name: value.name,
+    email: value.email,
+    attributes: Dictionary(value.attributes.map { ($0.key, $0.value) }) { $1 },
+    trackID: value.trackId,
+    money: openName(value.money, prefix: "CUSTOMER_MONEY_"),
+    revision: value.revision,
+    createdAt: date(value.createdAt),
+    updatedAt: date(value.updatedAt))
+}
+
+func decodeCustomer(_ body: Data) throws -> CustomerRecord {
+  let answer = try wire(Wire.GetCustomerResponse.self, body)
+  return try at("customer") { customerRecord(try given(answer.customer)) }
+}
+
+func decodeRegistered(_ body: Data) throws -> RegisteredCustomer {
+  let answer = try wire(Wire.RegisterCustomerResponse.self, body)
+  return RegisteredCustomer(
+    record: try at("customer") { customerRecord(try given(answer.customer)) },
+    created: answer.created)
+}
+
+func decodeToken(_ body: Data) throws -> CustomerToken {
+  let answer = try wire(Wire.CreateTokenResponse.self, body)
+  return CustomerToken(
+    token: answer.token,
+    id: answer.tokenId,
+    customerID: answer.customerId,
+    scopes: answer.scopes.map { scope in
+      var name = shortName(scope, prefix: "CUSTOMER_TOKEN_SCOPE_")
+      if let split = name.lastIndex(of: "_") { name.replaceSubrange(split...split, with: ":") }
+      return CustomerTokenScope(rawValue: name)
+    },
+    expiresAt: date(answer.expiresAt))
+}
