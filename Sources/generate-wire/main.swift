@@ -1,6 +1,9 @@
 import Foundation
 
-let operations = ["Entitlements.CheckFeature", "Entitlements.ListEntitlements"]
+let operations = [
+  "Entitlements.CheckFeature", "Entitlements.ListEntitlements", "Usage.CreateHold",
+  "Usage.ReleaseHold", "Usage.ReportUsage", "Usage.SettleHold",
+]
 let schemaPrefix = "#/components/schemas/"
 typealias Object = [String: Any]
 
@@ -72,9 +75,6 @@ func generate(_ document: Object) throws -> String {
     guard let route = found[id] else { throw Failure(description: "No operation \(id).") }
     let content = { (container: Object?) in
       ((container?["content"] as? Object)?["application/json"] as? Object)?["schema"] as? Object
-    }
-    if let body = content(route.operation["requestBody"] as? Object) {
-      _ = swiftType(body, references: &references)
     }
     if let answer = content((route.operation["responses"] as? Object)?["200"] as? Object) {
       _ = swiftType(answer, references: &references)

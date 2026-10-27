@@ -17,6 +17,9 @@ enum Wire {
     var `nextChangeAt`: Int64?
     var `served`: ServedCatalogue?
   }
+  struct CreateHoldResponse: Decodable, Sendable {
+    var `tracked`: TrackedUsage?
+  }
   struct DefaultPlanSource: Decodable, Sendable {
     var `planId`: String
     var `planKey`: String
@@ -99,6 +102,12 @@ enum Wire {
     var `value`: FeatureValue?
     var `versionNumber`: Int64
   }
+  struct ReleaseHoldResponse: Decodable, Sendable {
+    var `tracked`: TrackedUsage?
+  }
+  struct ReportUsageResponse: Decodable, Sendable {
+    var `tracked`: TrackedUsage?
+  }
   struct ServedCatalogue: Decodable, Sendable {
     var `changeId`: String?
     var `nothing`: NothingServed?
@@ -113,6 +122,16 @@ enum Wire {
     var `id`: String
     var `name`: String
   }
+  struct SettleHoldResponse: Decodable, Sendable {
+    var `tracked`: TrackedUsage?
+  }
+  struct TrackedUsage: Decodable, Sendable {
+    var `asOf`: Int64
+    var `customer`: EntitledCustomer?
+    var `entitlement`: Entitlement?
+    var `served`: ServedCatalogue?
+    var `usage`: UsageResult?
+  }
   struct Unlimited: Decodable, Sendable {}
   struct Upgrade: Decodable, Sendable {
     var `action`: UpgradeAction
@@ -126,6 +145,23 @@ enum Wire {
   typealias UpgradeAction = String
   typealias UpgradeKind = String
   typealias UpgradeMove = String
+  typealias UsageMode = String
+  typealias UsageOutcome = String
+  typealias UsageRefusal = String
+  struct UsageResult: Decodable, Sendable {
+    var `amount`: Int64
+    var `expiresAtMs`: Int64?
+    var `holdId`: String?
+    var `late`: Bool
+    var `meterChange`: Int64
+    var `mode`: UsageMode
+    var `occurredAtMs`: Int64?
+    var `outcome`: UsageOutcome
+    var `overBy`: Int64
+    var `refusal`: UsageRefusal?
+    var `replayed`: Bool
+    var `usageId`: String?
+  }
 
   static let entitlementsCheckFeature = Route(
     method: "GET", path: "/v1/customers/{customer.external_id}/entitlements/{feature_key}",
@@ -133,4 +169,14 @@ enum Wire {
   static let entitlementsListEntitlements = Route(
     method: "GET", path: "/v1/customers/{customer.external_id}/entitlements",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
+  static let usageCreateHold = Route(
+    method: "POST", path: "/v1/customers/{customer.external_id}/usage/holds", query: [])
+  static let usageReleaseHold = Route(
+    method: "DELETE", path: "/v1/customers/{customer.external_id}/usage/holds/{hold_id}",
+    query: ["target.team_id", "target.project_id", "target.environment_id"])
+  static let usageReportUsage = Route(
+    method: "POST", path: "/v1/customers/{customer.external_id}/usage", query: [])
+  static let usageSettleHold = Route(
+    method: "POST", path: "/v1/customers/{customer.external_id}/usage/holds/{hold_id}:settle",
+    query: [])
 }

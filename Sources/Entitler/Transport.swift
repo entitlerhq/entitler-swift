@@ -37,6 +37,11 @@ struct Request: Sendable {
   var query: [(name: String, value: String)] = []
   var timeout: TimeInterval?
   var revalidate = false
+  var body: Data? = nil
+  var idempotencyKey: String? = nil
+  var retryable: Bool? = nil
+
+  var isRetryable: Bool { retryable ?? ["GET", "PUT", "DELETE"].contains(method) }
 }
 
 struct Response: Sendable {
@@ -46,6 +51,7 @@ struct Response: Sendable {
   let cacheControl: String?
   let age: Int?
   var requestID: String? = nil
+  var retried = false
 
   var noStore: Bool { hasCacheDirective("no-store", in: cacheControl) }
 }
@@ -229,15 +235,28 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func decoded<Answer>(_ response: Response, _ decode: (Data) throws -> Answer) throws
-    -> Answer
-  {
+  func call<Answer: Sendable>(
+    _ request: Request, decode: @escaping @Sendable (Data) throws -> Answer
+  ) async throws -> (answer: Answer, retried: Bool) {
+    _ = try request.timeout.map(validTimeout)
+    return try await guarded { [self] in
+      let response = try await send(request)
+      return (
+        try decoded(response, decode, idempotencyKey: request.idempotencyKey), response.retried
+      )
+    }
+  }
+
+  private func decoded<Answer>(
+    _ response: Response, _ decode: (Data) throws -> Answer, idempotencyKey: String? = nil
+  ) throws -> Answer {
     do {
       return try decode(response.body)
     } catch {
       var failure = APIError(
         status: response.status, code: grpcCode(status: 500), reason: .responseInvalid,
-        parameters: [:], requestID: response.requestID, retryAfter: nil, idempotencyKey: nil)
+        parameters: [:], requestID: response.requestID, retryAfter: nil,
+        idempotencyKey: idempotencyKey)
       failure.underlyingError = error
       throw EntitlerError.api(failure)
     }
@@ -351,19 +370,25 @@ final class Core: Sendable, CustomReflectable {
       var urlRequest = URLRequest(
         url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
       urlRequest.httpMethod = request.method
-      for (name, value) in headers(etag: etag) {
+      urlRequest.httpBody = request.body
+      for (name, value) in headers(etag: etag, body: request.body != nil) {
         urlRequest.setValue(value, forHTTPHeaderField: name)
       }
       let failure: EntitlerError
       do {
-        let (body, http) = try await attempt(urlRequest, timeout: timeout)
-        let response = Response(http, body: body)
+        let (body, http) = try await attempt(
+          urlRequest, timeout: timeout, idempotencyKey: request.idempotencyKey)
+        var response = Response(http, body: body)
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
           await state.reachable()
+          response.retried = retries > 0
           return response
         }
-        let error = apiError(http, body: body, now: hooks.now())
-        guard [408, 429, 500, 502, 503, 504].contains(http.statusCode), retries < options.maxRetries
+        let error = apiError(
+          http, body: body, now: hooks.now(), idempotencyKey: request.idempotencyKey)
+        guard
+          [408, 429, 500, 502, 503, 504].contains(http.statusCode) || error.code == "Aborted",
+          request.isRetryable, retries < options.maxRetries
         else { throw EntitlerError.api(error) }
         if let retryAfter = error.retryAfter {
           guard retryAfter <= options.maxRetryDelay else { throw EntitlerError.api(error) }
@@ -374,7 +399,9 @@ final class Core: Sendable, CustomReflectable {
         failure = .api(error)
       } catch let error as EntitlerError {
         switch error {
-        case .connection, .timeout: failure = error
+        case .connection, .timeout:
+          guard request.isRetryable else { throw error }
+          failure = error
         default: throw error
         }
       }
@@ -384,9 +411,9 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func attempt(_ request: URLRequest, timeout: TimeInterval) async throws -> (
-    Data, HTTPURLResponse
-  ) {
+  private func attempt(
+    _ request: URLRequest, timeout: TimeInterval, idempotencyKey: String?
+  ) async throws -> (Data, HTTPURLResponse) {
     let session = options.session
     let exchange = exchange
     let hooks = hooks
@@ -404,11 +431,12 @@ final class Core: Sendable, CustomReflectable {
         return try await group.next() ?? nil
       }
       guard let (body, response) = answer else {
-        throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: nil))
+        throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
       }
       guard let http = response as? HTTPURLResponse else {
         throw EntitlerError.connection(
-          ConnectionError(underlyingError: URLError(.badServerResponse), idempotencyKey: nil))
+          ConnectionError(
+            underlyingError: URLError(.badServerResponse), idempotencyKey: idempotencyKey))
       }
       return (body, http)
     } catch let error as EntitlerError {
@@ -417,25 +445,28 @@ final class Core: Sendable, CustomReflectable {
       if Task.isCancelled || error is CancellationError { throw CancellationError() }
       guard let urlError = error as? URLError else {
         throw EntitlerError.connection(
-          ConnectionError(underlyingError: URLError(.unknown), idempotencyKey: nil))
+          ConnectionError(underlyingError: URLError(.unknown), idempotencyKey: idempotencyKey))
       }
       if urlError.code == .timedOut {
-        throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: nil))
+        throw EntitlerError.timeout(TimeoutError(timeout: timeout, idempotencyKey: idempotencyKey))
       }
       throw EntitlerError.connection(
-        ConnectionError(underlyingError: URLError(urlError.code), idempotencyKey: nil))
+        ConnectionError(underlyingError: URLError(urlError.code), idempotencyKey: idempotencyKey))
     }
   }
 
-  private func headers(etag: String?) -> [String: String] {
+  private func headers(etag: String?, body: Bool) -> [String: String] {
     var headers = [
       "Accept": "application/json", "User-Agent": userAgent, "Authorization": "Bearer \(key)",
     ]
     if let etag { headers["If-None-Match"] = etag }
+    if body { headers["Content-Type"] = "application/json" }
     return headers
   }
 
-  private func apiError(_ http: HTTPURLResponse, body: Data, now: Date) -> APIError {
+  private func apiError(
+    _ http: HTTPURLResponse, body: Data, now: Date, idempotencyKey: String?
+  ) -> APIError {
     let status = http.statusCode
     let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
     let detail = object?["error"] as? [String: Any]
@@ -450,7 +481,7 @@ final class Core: Sendable, CustomReflectable {
       retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap {
         retryAfterSeconds($0, now: now)
       },
-      idempotencyKey: nil)
+      idempotencyKey: idempotencyKey)
   }
 }
 

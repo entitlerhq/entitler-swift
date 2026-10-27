@@ -34,9 +34,13 @@ private let featureTypes: [String: FeatureType] = [
   "ENTITLED_FEATURE_KIND_GROUP": .group,
 ]
 
+private func shortName(_ name: String, prefix: String) -> String {
+  guard name.hasPrefix(prefix) else { return name }
+  return String(name.dropFirst(prefix.count)).lowercased()
+}
+
 private func openName(_ name: String, prefix: String) -> OpenName {
-  guard name.hasPrefix(prefix) else { return OpenName(rawValue: name) }
-  return OpenName(rawValue: String(name.dropFirst(prefix.count)).lowercased())
+  OpenName(rawValue: shortName(name, prefix: prefix))
 }
 
 private func limit(_ value: Wire.Limit) -> Limit {
@@ -207,4 +211,34 @@ func decodeEntitlements(_ body: Data) throws -> Entitlements {
     context: try context(
       customer: answer.customer, asOf: answer.asOf, nextChangeAt: answer.nextChangeAt,
       served: answer.served))
+}
+
+func decodeUsage(_ body: Data) throws -> UsageResult {
+  let answer = try wire(Wire.ReportUsageResponse.self, body)
+  return try at("tracked") {
+    let tracked = try given(answer.tracked)
+    let usage = try at("usage") { try given(tracked.usage) }
+    return UsageResult(
+      entitlement: try at("entitlement") { try entitlement(given(tracked.entitlement)) },
+      context: try context(
+        customer: tracked.customer, asOf: tracked.asOf, nextChangeAt: nil, served: tracked.served),
+      outcome: UsageOutcome(rawValue: shortName(usage.outcome, prefix: "USAGE_OUTCOME_")),
+      refusal: usage.refusal.map {
+        UsageRefusal(rawValue: shortName($0, prefix: "USAGE_REFUSAL_"))
+      },
+      id: usage.usageId,
+      holdID: usage.holdId,
+      mode: UsageMode(rawValue: shortName(usage.mode, prefix: "USAGE_MODE_")),
+      amount: usage.amount,
+      meterChange: usage.meterChange,
+      overBy: usage.overBy,
+      late: usage.late,
+      occurredAt: usage.occurredAtMs.map(milliseconds),
+      expiresAt: usage.expiresAtMs.map(milliseconds),
+      replayed: usage.replayed)
+  }
+}
+
+private func milliseconds(_ value: Int64) -> Date {
+  Date(timeIntervalSince1970: TimeInterval(value) / 1000)
 }
