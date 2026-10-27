@@ -141,6 +141,34 @@ import Testing
     #expect(stale.stale)
   }
 
+  @Test func aDirectiveThatOnlyStartsWithNoStoreKeepsTheAnswer() async throws {
+    let api = FakeAPI([
+      Answer(headers: ["Cache-Control": "private, max-age=60, no-store-ish"], body: switchCheck)
+    ])
+    let customer = try api.server().customer("ada")
+    _ = try await customer.check("priority_support")
+    _ = try await customer.check("priority_support")
+    #expect(api.requests.count == 1)
+  }
+
+  @Test func aNotModifiedAnswerMarkedNoStoreIsNotKept() async throws {
+    let store = MemoryCacheStore(capacity: 10)
+    let api = FakeAPI([
+      Answer(
+        headers: ["ETag": "W/\"v1\"", "Cache-Control": "private, no-cache"], body: switchCheck),
+      Answer(status: 304, headers: ["ETag": "W/\"v2\"", "Cache-Control": "no-store"], body: ""),
+    ])
+    let server = try api.server(cache: store)
+    let request = try Wire.entitlementsCheckFeature.request([
+      "customer.external_id": "ada", "feature_key": "priority_support",
+    ])
+    _ = try await server.customer("ada").check("priority_support")
+    let revalidated = try await server.customer("ada").check("priority_support")
+
+    #expect(revalidated.entitled)
+    #expect(await store.entry(forKey: server.core.cacheKey(request))?.etag == "W/\"v1\"")
+  }
+
   @Test func anUnreadableKeptAnswerIsAMiss() async throws {
     let store = MemoryCacheStore(capacity: 10)
     let api = FakeAPI([Answer(body: switchCheck)])

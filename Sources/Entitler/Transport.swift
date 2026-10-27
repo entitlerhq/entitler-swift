@@ -299,7 +299,7 @@ final class Core: Sendable, CustomReflectable {
       }
       let answer = try decoded(
         response.status == 304 ? entry.map(Response.init) ?? response : response, decode)
-      if let entry { await store(entry, key: key, in: cache) }
+      if let entry, !response.noStore { await store(entry, key: key, in: cache) }
       return answer
     } catch let error as EntitlerError where error.isUnreachable {
       let retryAfter = error.apiError?.retryAfter ?? 0
