@@ -171,6 +171,19 @@ func body(_ request: URLRequest) -> [String: Any] {
     #expect(body(requests[2])["mode"] as? String == "USAGE_MODE_OBSERVE")
   }
 
+  @Test func withHoldLeavesAnotherCallersHoldToThem() async throws {
+    let api = FakeAPI([Answer(body: usage("DUPLICATE", holdID: "ho_1"))])
+    let answer = try await api.server().customer("ada").withHold(
+      of: aiCredits, amount: 500, idempotencyKey: "m-1"
+    ) { hold in
+      try hold.use(80)
+      return hold.isDuplicate
+    }
+
+    #expect(answer)
+    #expect(api.requests.count == 1)
+  }
+
   @Test func workThatFailsBeforeReportingReleasesTheHold() async throws {
     struct Failed: Error {}
     let api = FakeAPI([
