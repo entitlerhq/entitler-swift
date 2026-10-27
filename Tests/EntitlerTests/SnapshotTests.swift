@@ -120,7 +120,7 @@ func refusedReason(_ token: String, now: Date = issued) -> Reason? {
           "currency": "aud",
           "sources": [
             [
-              "type": "addon", "plan": ["id": "pl_9", "key": "boost", "name": "Boost"],
+              "type": "add_on", "plan": ["id": "pl_9", "key": "boost", "name": "Boost"],
               "version": 1, "quantity": 2, "value": 500, "through": "",
             ],
             [
@@ -131,6 +131,15 @@ func refusedReason(_ token: String, now: Date = issued) -> Reason? {
         ],
         ["key": "exports", "kind": "metered", "entitled": false, "value": 0],
         ["key": "seats", "kind": "configuration", "entitled": true, "value": "unlimited"],
+        [
+          "key": "spend", "kind": "metered", "entitled": true, "decimals": 2, "currency": "aud",
+          "value": [
+            ["marketId": "mk_au", "limit": 5000], ["marketId": "mk_us", "limit": "unlimited"],
+          ],
+          "sources": [
+            ["type": "grant", "grant": "gr_2", "value": [["marketId": "mk_au", "limit": 5000]]]
+          ],
+        ],
         [
           "key": "workspace", "kind": "group", "entitled": true, "value": ["seats"],
           "sources": [["type": "group", "features": ["seats"]]],
@@ -180,6 +189,12 @@ func refusedReason(_ token: String, now: Date = issued) -> Reason? {
       entitlements["exports"]?.meter
         == Meter(used: 0, held: 0, banked: 0, remaining: .amount(0), resetsAt: nil))
     #expect(entitlements["seats"]?.value == .unlimited)
+    let spend = try #require(entitlements["spend"])
+    #expect(spend.value == .amount(0))
+    #expect(spend.markets == ["mk_au": .amount(5000), "mk_us": .unlimited])
+    guard case .grant(let spendGrant) = spend.sources.first else { throw SourceMismatch() }
+    #expect(spendGrant.markets == ["mk_au": .amount(5000)])
+    #expect(entitlements["workspace"]?.markets == nil)
     #expect(entitlements["workspace"]?.value == .on)
     #expect(entitlements["workspace"]?.sources == [.group(features: ["seats"])])
     #expect(entitlements.has("workspace"))
