@@ -178,10 +178,10 @@ import Testing
     _ = try await server.customer("ada").check("priority_support")
     let revalidated = try await server.customer("ada").check("priority_support")
 
+    let generation = await server.core.generation(request, credential: "test-secret-key", store)
+    let key = server.core.cacheKey(request, credential: "test-secret-key", generation: generation)
     #expect(revalidated.entitled)
-    #expect(
-      await store.entry(forKey: server.core.cacheKey(request, credential: "test-secret-key"))?.etag
-        == "W/\"v1\"")
+    #expect(await store.entry(forKey: key)?.etag == "W/\"v1\"")
   }
 
   @Test func anUnreadableKeptAnswerIsAMiss() async throws {
@@ -191,11 +191,13 @@ import Testing
     let request = try Wire.entitlementsCheckFeature.request([
       "external_id": "ada", "feature_key": "priority_support",
     ])
+    let generation = await server.core.generation(request, credential: "test-secret-key", store)
     await store.setEntry(
       CacheEntry(
         body: "{", etag: "W/\"v0\"", cacheControl: "private, max-age=600", age: nil,
         receivedAt: Date()),
-      forKey: server.core.cacheKey(request, credential: "test-secret-key"), timeToLive: 600)
+      forKey: server.core.cacheKey(request, credential: "test-secret-key", generation: generation),
+      timeToLive: 600)
 
     let check = try await server.customer("ada").check("priority_support")
 
@@ -218,5 +220,28 @@ import Testing
     let key = server.core.cacheKey(request, credential: "test-secret-key")
     #expect(key.count == 64)
     #expect(!key.contains("test-secret-key"))
+  }
+
+  @Test func aWriteForACustomerDropsOnlyTheirKeptAnswersInEveryClientSharingTheStore() async throws
+  {
+    let store = MemoryCacheStore(capacity: 20)
+    let kept = Answer(headers: ["Cache-Control": "private, max-age=600"], body: switchCheck)
+    let api = FakeAPI([kept, kept, Answer(body: usage("RECORDED", amount: 1)), kept])
+    let first = try api.server(cache: store)
+    let second = try api.server(cache: store)
+    _ = try await first.customer("ada").check("priority_support")
+    _ = try await first.customer("bob").check("priority_support")
+    _ = try await second.customer("ada").check("priority_support")
+    _ = try await second.customer("ada").recordUsage(
+      of: "ai_credits", amount: 1, idempotencyKey: "m-1")
+    _ = try await first.customer("ada").check("priority_support")
+    _ = try await first.customer("bob").check("priority_support")
+
+    #expect(
+      api.requests.map(\.url?.path) == [
+        "/v1/customers/ada/entitlements/priority_support",
+        "/v1/customers/bob/entitlements/priority_support", "/v1/customers/ada/usage",
+        "/v1/customers/ada/entitlements/priority_support",
+      ])
   }
 }

@@ -18,6 +18,8 @@ struct Route: Sendable {
       rest = rest[rest.index(after: close)...]
     }
     precondition(given.allSatisfy { query.contains($0.name) }, "\(self.path) takes no such query.")
-    return Request(method: method, path: path + rest, query: given)
+    var request = Request(method: method, path: path + rest, query: given)
+    request.customer = variables["external_id"]
+    return request
   }
 }
