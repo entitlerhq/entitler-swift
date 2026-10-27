@@ -36,11 +36,11 @@ import Testing
         .plan(
           PlanSource(
             planID: "pl_1", plan: "pro", name: "Pro", product: "pr_1", version: 3, byDefault: false,
-            value: .on, through: nil)),
+            value: .on, markets: nil, through: nil)),
         .grant(
           GrantSource(
             grant: "gr_1", until: Date(timeIntervalSince1970: 1_790_086_400), value: nil,
-            through: nil)),
+            markets: nil, through: nil)),
       ])
     #expect(check.upgrades.map(\.plan) == ["team"])
     #expect(check.upgrades.first?.kind.rawValue == "plan")
@@ -61,6 +61,44 @@ import Testing
     #expect(check.value == .amount(1_000))
     #expect(check.nextChangeAt == Date(timeIntervalSince1970: 1_790_500_000))
     #expect(check.served.source == .nothing)
+  }
+
+  @Test func aMoneyFeatureCarriesItsScaleCurrencyAndMarkets() async throws {
+    let api = FakeAPI([
+      Answer(
+        body: #"""
+          {"asOf": 1790000000, "customer": {"externalId": "ada"}, "served": {"nothing": {}},
+            "entitlement": {"featureKey": "spend", "kind": "ENTITLED_FEATURE_KIND_METERED",
+              "entitled": true, "decimals": 2, "currency": "aud",
+              "value": {"money": {"limits": [{"marketId": "mk_au", "limit": {"count": 5000}},
+                {"marketId": "mk_us", "limit": {"unlimited": {}}}]}},
+              "sources": [{"plan": {"planId": "pl_1", "planKey": "pro", "planName": "Pro",
+                "versionNumber": 3,
+                "value": {"money": {"limits": [{"marketId": "mk_au", "limit": {"count": 5000}}]}}}}],
+              "upgrades": [],
+              "meter": {"used": 1250, "held": 0, "banked": 0, "remaining": {"count": 3750}}}}
+          """#)
+    ])
+    let check = try await api.server().customer("ada").check("spend")
+
+    #expect(check.value == .amount(0))
+    #expect(check.markets == ["mk_au": .amount(5000), "mk_us": .unlimited])
+    #expect(check.decimals == 2)
+    #expect(check.currency == "aud")
+    guard case .plan(let plan) = check.sources.first else {
+      Issue.record("Expected a plan source.")
+      return
+    }
+    #expect(plan.markets == ["mk_au": .amount(5000)])
+  }
+
+  @Test func aFeatureThatIsNotMoneyHasNoMarketsOrCurrency() async throws {
+    let api = FakeAPI([Answer(body: switchCheck)])
+    let check = try await api.server().customer("ada").check("priority_support")
+
+    #expect(check.markets == nil)
+    #expect(check.decimals == 0)
+    #expect(check.currency == nil)
   }
 
   @Test func aFeatureDeclaredAsAnotherKindIsRefused() async throws {

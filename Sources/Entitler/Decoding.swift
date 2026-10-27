@@ -58,6 +58,14 @@ private func featureValue(_ value: Wire.FeatureValue?, entitled: Bool) throws ->
   return .amount(0)
 }
 
+private func markets(_ value: Wire.FeatureValue?) -> [String: Limit]? {
+  value?.money.map { money in
+    Dictionary(
+      money.limits.map { ($0.marketId, limit($0.limit ?? Wire.Limit(count: 0))) }
+    ) { _, last in last }
+  }
+}
+
 private func amount(_ limit: Limit) -> FeatureValue {
   switch limit {
   case .amount(let count): .amount(count)
@@ -85,6 +93,7 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
           version: plan.versionNumber,
           byDefault: false,
           value: try at("value") { try sourceValue(plan.value) },
+          markets: markets(plan.value),
           through: through(plan.throughFeatureKey)))
     }
   }
@@ -99,6 +108,7 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
           version: plan.versionNumber,
           byDefault: true,
           value: nil,
+          markets: nil,
           through: through(plan.throughFeatureKey)))
     }
   }
@@ -112,6 +122,7 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
           version: addOn.versionNumber,
           quantity: addOn.quantity,
           value: try at("value") { try sourceValue(addOn.value) },
+          markets: markets(addOn.value),
           through: through(addOn.throughFeatureKey)))
     }
   }
@@ -122,6 +133,7 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
           grant: grant.grantId,
           until: grant.until.map(date),
           value: try at("value") { try sourceValue(grant.value) },
+          markets: markets(grant.value),
           through: through(grant.throughFeatureKey)))
     }
   }
@@ -157,6 +169,9 @@ private func entitlement(_ value: Wire.Entitlement) throws -> Entitlement {
     type: featureTypes[value.kind] ?? FeatureType(rawValue: value.kind),
     entitled: value.entitled,
     value: try at("value") { try featureValue(value.value, entitled: value.entitled) },
+    markets: markets(value.value),
+    decimals: Int(value.decimals),
+    currency: value.currency.isEmpty ? nil : value.currency,
     sources: try at("sources") {
       try value.sources.enumerated().compactMap { index, item in
         try at(String(index)) { try source(item) }
@@ -235,7 +250,8 @@ func decodeUsage(_ body: Data) throws -> UsageResult {
       late: usage.late,
       occurredAt: usage.occurredAtMs.map(milliseconds),
       expiresAt: usage.expiresAtMs.map(milliseconds),
-      replayed: usage.replayed)
+      replayed: usage.replayed,
+      saturated: usage.saturated)
   }
 }
 

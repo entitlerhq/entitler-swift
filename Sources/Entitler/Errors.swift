@@ -171,8 +171,8 @@ public struct TimeoutError: Error, Sendable, LocalizedError, CustomStringConvert
   public var description: String { message }
 }
 
-/// A refused hold, from ``Customer/startHold(of:amount:idempotencyKey:ttlSeconds:timeout:)`` or
-/// ``Customer/withHold(of:amount:idempotencyKey:ttlSeconds:timeout:_:)``.
+/// A refused hold, from ``Customer/startHold(of:amount:idempotencyKey:currency:ttlSeconds:timeout:)`` or
+/// ``Customer/withHold(of:amount:idempotencyKey:currency:ttlSeconds:timeout:_:)``.
 public struct UsageRefusedError: Error, Sendable, LocalizedError, CustomStringConvertible {
   /// The refused answer, with its ``UsageResult/refusal``, the meter and the upgrades.
   public let result: UsageResult
