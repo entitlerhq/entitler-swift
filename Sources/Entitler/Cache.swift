@@ -9,7 +9,8 @@ import Foundation
 /// A write for a customer, such as recording usage, drops that customer's kept answers in every
 /// client sharing the store with the same key once its request finishes, whatever its answer: the
 /// store keeps a marker per key and customer that their answers' keys include, and the write
-/// replaces it. Clients with different keys keep answers apart, so they never share them.
+/// replaces it. When the store throws while keeping the new marker, the old one stands and its
+/// answers are served until they expire. Clients with different keys never share kept answers.
 public protocol CacheStore: Sendable {
   /// The entry kept under a key, or `nil`.
   func entry(forKey key: String) async throws -> CacheEntry?
