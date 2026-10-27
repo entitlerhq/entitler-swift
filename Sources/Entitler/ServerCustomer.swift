@@ -1,7 +1,7 @@
 import Foundation
 
-/// What a customer token lets an app do, extensible: a scope this SDK does not list is kept as it
-/// is.
+/// What a customer token lets an app do, extensible: a scope this SDK does not list is kept as the
+/// API spells it, such as `CUSTOMER_TOKEN_SCOPE_REPORTS_READ`, and sent back unchanged.
 public struct CustomerTokenScope: RawRepresentable, Hashable, Sendable, CustomStringConvertible {
   /// The scope as the SDK spells it, such as `usage:write`.
   public let rawValue: String
@@ -20,6 +20,20 @@ public struct CustomerTokenScope: RawRepresentable, Hashable, Sendable, CustomSt
   public static let usageWrite = CustomerTokenScope(rawValue: "usage:write")
   /// Buys for the customer: only for people who may.
   public static let billingSelf = CustomerTokenScope(rawValue: "billing:self")
+
+  private static let wirePrefix = "CUSTOMER_TOKEN_SCOPE_"
+  private static let listed: [CustomerTokenScope] = [
+    .entitlementsRead, .usageRead, .usageWrite, .billingSelf,
+  ]
+
+  init(wireName: String) {
+    self = Self.listed.first { $0.wireName == wireName } ?? CustomerTokenScope(rawValue: wireName)
+  }
+
+  var wireName: String {
+    guard !rawValue.hasPrefix(Self.wirePrefix) else { return rawValue }
+    return Self.wirePrefix + rawValue.uppercased().replacingOccurrences(of: ":", with: "_")
+  }
 }
 
 /// A customer's record.
@@ -171,9 +185,7 @@ public struct ServerCustomer: Customer, CustomStringConvertible, CustomReflectab
       throw ArgumentError(message: Messages.ttlToken)
     }
     let body = TokenBody(
-      scopes: scopes?.map {
-        "CUSTOMER_TOKEN_SCOPE_" + $0.rawValue.uppercased().replacingOccurrences(of: ":", with: "_")
-      },
+      scopes: scopes?.map(\.wireName),
       lifetimeSeconds: ttlSeconds)
     return try await send(Wire.customerTokensCreateToken, body, timeout, decodeToken)
   }
