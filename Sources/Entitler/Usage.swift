@@ -396,6 +396,7 @@ extension Customer {
   /// let summary = try await customer.withHold(
   ///   of: aiCredits, amount: 500, idempotencyKey: "summary-\(jobID)"
   /// ) { hold in
+  ///   if hold.isDuplicate { return try await summaries.result(for: jobID) }
   ///   let answer = try await summarise(document)
   ///   try hold.use(answer.tokens)
   ///   return answer.summary
