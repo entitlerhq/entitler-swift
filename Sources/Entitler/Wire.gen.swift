@@ -87,6 +87,7 @@ enum Wire {
     var `configuration`: Limit?
     var `group`: GroupValue?
     var `metered`: Limit?
+    var `money`: MarketLimits?
     var `switch`: Bool?
   }
   struct GetCustomerResponse: Decodable, Sendable {
@@ -121,6 +122,13 @@ enum Wire {
     var `entitlements`: [Entitlement]
     var `nextChangeAt`: Int64?
     var `served`: ServedCatalogue?
+  }
+  struct MarketLimit: Decodable, Sendable {
+    var `limit`: Limit?
+    var `marketId`: String
+  }
+  struct MarketLimits: Decodable, Sendable {
+    var `limits`: [MarketLimit]
   }
   struct Meter: Decodable, Sendable {
     var `banked`: Int64
@@ -216,23 +224,22 @@ enum Wire {
     method: "GET", path: "/v1/customers/{external_id}",
     query: ["target.team_id", "target.project_id", "target.environment_id"])
   static let customersRegisterCustomer = Route(
-    method: "PUT", path: "/v1/customers/{customer.external_id}", query: [])
+    method: "PUT", path: "/v1/customers/{external_id}", query: [])
   static let customersUpdateCustomer = Route(
     method: "PATCH", path: "/v1/customers/{external_id}", query: [])
   static let entitlementsCheckFeature = Route(
-    method: "GET", path: "/v1/customers/{customer.external_id}/entitlements/{feature_key}",
+    method: "GET", path: "/v1/customers/{external_id}/entitlements/{feature_key}",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
   static let entitlementsListEntitlements = Route(
-    method: "GET", path: "/v1/customers/{customer.external_id}/entitlements",
+    method: "GET", path: "/v1/customers/{external_id}/entitlements",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
   static let usageCreateHold = Route(
-    method: "POST", path: "/v1/customers/{customer.external_id}/usage/holds", query: [])
+    method: "POST", path: "/v1/customers/{external_id}/usage/holds", query: [])
   static let usageReleaseHold = Route(
-    method: "DELETE", path: "/v1/customers/{customer.external_id}/usage/holds/{hold_id}",
+    method: "DELETE", path: "/v1/customers/{external_id}/usage/holds/{hold_id}",
     query: ["target.team_id", "target.project_id", "target.environment_id"])
   static let usageReportUsage = Route(
-    method: "POST", path: "/v1/customers/{customer.external_id}/usage", query: [])
+    method: "POST", path: "/v1/customers/{external_id}/usage", query: [])
   static let usageSettleHold = Route(
-    method: "POST", path: "/v1/customers/{customer.external_id}/usage/holds/{hold_id}:settle",
-    query: [])
+    method: "POST", path: "/v1/customers/{external_id}/usage/holds/{hold_id}:settle", query: [])
 }

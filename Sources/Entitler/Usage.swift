@@ -462,7 +462,7 @@ extension Customer {
     _ route: Route, _ variables: [String: String], _ body: Body?, _ key: String?,
     _ timeout: TimeInterval?
   ) async throws -> (answer: UsageResult, retried: Bool) {
-    var request = try route.request(variables.merging(["customer.external_id": id]) { $1 })
+    var request = try route.request(variables.merging(["external_id": id]) { $1 })
     request.body = try body.map { try JSONEncoder().encode($0) }
     request.idempotencyKey = key
     request.retryable = true

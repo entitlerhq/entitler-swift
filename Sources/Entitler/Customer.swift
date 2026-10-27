@@ -105,7 +105,7 @@ extension Customer {
     asOf: Date? = nil, revalidate: Bool = false, timeout: TimeInterval? = nil
   ) async throws -> Entitlements {
     var request = try Wire.entitlementsListEntitlements.request(
-      ["customer.external_id": id], query: try asOfQuery(asOf))
+      ["external_id": id], query: try asOfQuery(asOf))
     request.revalidate = revalidate
     request.timeout = timeout
     return try await core.cachedCall(request, decode: decodeEntitlements)
@@ -116,7 +116,7 @@ extension Customer {
     _ decode: @escaping @Sendable (Data) throws -> Answer
   ) async throws -> Answer {
     var request = try Wire.entitlementsCheckFeature.request(
-      ["customer.external_id": id, "feature_key": require(feature, Messages.feature)],
+      ["external_id": id, "feature_key": require(feature, Messages.feature)],
       query: try asOfQuery(asOf))
     request.revalidate = revalidate
     request.timeout = timeout
