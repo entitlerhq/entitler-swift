@@ -243,7 +243,7 @@ enum Wire {
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
   static let snapshotKeys = Route(method: "GET", path: "/v1/snapshot-keys", query: [])
   static let snapshotsCreateSnapshot = Route(
-    method: "POST", path: "/v1/customers/{customer.external_id}/snapshots", query: [])
+    method: "POST", path: "/v1/customers/{external_id}/snapshots", query: [])
   static let usageCreateHold = Route(
     method: "POST", path: "/v1/customers/{external_id}/usage/holds", query: [])
   static let usageReleaseHold = Route(
