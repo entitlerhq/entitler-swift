@@ -7,8 +7,9 @@ import Foundation
 /// skipped; each goes to ``EntitlerOptions/onError`` and neither fails the call.
 ///
 /// A write for a customer, such as recording usage, drops that customer's kept answers in every
-/// client sharing the store once it is sent, whatever its answer: the store keeps a marker
-/// per customer that their answers' keys include, and the write replaces it.
+/// client sharing the store with the same key once its request finishes, whatever its answer: the
+/// store keeps a marker per key and customer that their answers' keys include, and the write
+/// replaces it. Clients with different keys keep answers apart, so they never share them.
 public protocol CacheStore: Sendable {
   /// The entry kept under a key, or `nil`.
   func entry(forKey key: String) async throws -> CacheEntry?
