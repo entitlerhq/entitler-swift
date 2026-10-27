@@ -66,7 +66,7 @@ func markets(_ value: Wire.FeatureValue?) -> [String: Limit]? {
   }
 }
 
-private func amount(_ limit: Limit) -> FeatureValue {
+func amount(_ limit: Limit) -> FeatureValue {
   switch limit {
   case .amount(let count): .amount(count)
   case .unlimited: .unlimited

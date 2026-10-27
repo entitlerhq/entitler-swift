@@ -55,6 +55,21 @@ let grantJSON = #"""
     #expect(api.requests.isEmpty)
   }
 
+  @Test func aGrantAnsweredWithoutItsValueIsResponseInvalid() async throws {
+    for value in ["", #""value": {},"#] {
+      let answer = grantJSON.replacingOccurrences(
+        of: #""value": {"limit": {"count": 5000}},"#, with: value)
+      let api = FakeAPI([Answer(body: #"{"grant": \#(answer), "revision": 7}"#)])
+      do {
+        _ = try await api.server().customer("ada").grant("ai_credits", value: .amount(5_000))
+        Issue.record("Expected a failure.")
+      } catch EntitlerError.api(let error) {
+        #expect(error.reason == .responseInvalid)
+        #expect(error.underlyingError is AnswerMismatch)
+      }
+    }
+  }
+
   @Test func revokeGrantRetriesOnlyWithoutARevision() async throws {
     let revoked = Answer(
       body:

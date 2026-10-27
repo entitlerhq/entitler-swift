@@ -269,15 +269,17 @@ private func changedBy(_ value: Wire.Actor?) -> ChangedBy? {
   value.map { ChangedBy(type: openName($0.type, prefix: "ACTOR_TYPE_"), id: $0.id) }
 }
 
-private func grant(_ value: Wire.Grant) -> Grant {
-  var held = FeatureValue.amount(0)
-  if value.value?.on != nil {
-    held = .on
-  } else if let granted = value.value?.limit {
-    held = limit(granted) == .unlimited ? .unlimited : .amount(granted.count ?? 0)
-  }
-  return Grant(
-    id: value.id, feature: value.featureKey, value: held, from: date(value.from),
+private func grantedValue(_ value: Wire.GrantValue?) throws -> FeatureValue {
+  let value = try given(value)
+  if value.on != nil { return .on }
+  return amount(limit(try at("limit") { try given(value.limit) }))
+}
+
+private func grant(_ value: Wire.Grant) throws -> Grant {
+  Grant(
+    id: value.id, feature: value.featureKey,
+    value: try at("value") { try grantedValue(value.value) },
+    from: date(value.from),
     until: value.until.map(date), reason: value.reason, revokedAt: value.revokedAt.map(date),
     revokeReason: value.revokeReason, grantedBy: changedBy(value.grantedBy),
     revokedBy: changedBy(value.revokedBy))
@@ -286,13 +288,13 @@ private func grant(_ value: Wire.Grant) -> Grant {
 func decodeGrant(_ body: Data) throws -> GrantResult {
   let answer = try wire(Wire.CreateGrantResponse.self, body)
   return GrantResult(
-    grant: try at("grant") { grant(try given(answer.grant)) }, revision: answer.revision)
+    grant: try at("grant") { try grant(try given(answer.grant)) }, revision: answer.revision)
 }
 
 func decodeRevokedGrant(_ body: Data) throws -> RevokedGrant {
   let answer = try wire(Wire.RevokeGrantResponse.self, body)
   return RevokedGrant(
-    grant: try at("grant") { grant(try given(answer.grant)) }, revision: answer.revision,
+    grant: try at("grant") { try grant(try given(answer.grant)) }, revision: answer.revision,
     changed: answer.changed)
 }
 
