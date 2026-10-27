@@ -39,16 +39,16 @@ private func openName(_ name: String, prefix: String) -> OpenName {
   return OpenName(rawValue: String(name.dropFirst(prefix.count)).lowercased())
 }
 
-private func limit(_ value: Wire.Limit) throws -> Limit {
+private func limit(_ value: Wire.Limit) -> Limit {
   value.unlimited != nil ? .unlimited : .amount(value.count ?? 0)
 }
 
 private func featureValue(_ value: Wire.FeatureValue?, entitled: Bool) throws -> FeatureValue {
   guard let value else { return .amount(0) }
   if let on = value.switch { return on ? .on : .amount(0) }
-  if let metered = value.metered { return try at("metered") { try amount(limit(metered)) } }
+  if let metered = value.metered { return amount(limit(metered)) }
   if let setting = value.configuration {
-    return try at("configuration") { try amount(limit(setting)) }
+    return amount(limit(setting))
   }
   if value.group != nil { return entitled ? .on : .amount(0) }
   return .amount(0)
@@ -127,7 +127,7 @@ private func source(_ value: Wire.EntitlementSource) throws -> EntitlementSource
   return nil
 }
 
-private func upgrade(_ value: Wire.Upgrade) throws -> Upgrade {
+private func upgrade(_ value: Wire.Upgrade) -> Upgrade {
   Upgrade(
     kind: openName(value.kind, prefix: "UPGRADE_KIND_"),
     planID: value.planId,
@@ -138,12 +138,12 @@ private func upgrade(_ value: Wire.Upgrade) throws -> Upgrade {
     action: openName(value.action, prefix: "UPGRADE_ACTION_"))
 }
 
-private func meter(_ value: Wire.Meter) throws -> Meter {
+private func meter(_ value: Wire.Meter) -> Meter {
   Meter(
     used: value.used,
     held: value.held,
     banked: value.banked,
-    remaining: try at("remaining") { try limit(value.remaining ?? Wire.Limit(count: 0)) },
+    remaining: limit(value.remaining ?? Wire.Limit(count: 0)),
     resetsAt: value.resetsAt.map(date))
 }
 
@@ -158,21 +158,15 @@ private func entitlement(_ value: Wire.Entitlement) throws -> Entitlement {
         try at(String(index)) { try source(item) }
       }
     },
-    upgrades: try at("upgrades") {
-      try value.upgrades.enumerated().map { index, item in
-        try at(String(index)) { try upgrade(item) }
-      }
-    },
-    meter: try at("meter") { try value.meter.map(meter) })
+    upgrades: value.upgrades.map(upgrade),
+    meter: value.meter.map(meter))
 }
 
 private func served(_ value: Wire.ServedCatalogue?) throws -> Served {
   let track = value?.track.map { ServedTrack(id: $0.id, name: $0.name) }
   let source: ServedSource
   if let release = value?.release {
-    source = .release(
-      id: try at("release") { release.id },
-      number: try at("release") { release.number })
+    source = .release(id: release.id, number: release.number)
   } else if let change = value?.changeId {
     source = .change(id: change)
   } else {
