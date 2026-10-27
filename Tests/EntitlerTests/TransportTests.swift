@@ -179,7 +179,9 @@ import Testing
     let revalidated = try await server.customer("ada").check("priority_support")
 
     #expect(revalidated.entitled)
-    #expect(await store.entry(forKey: server.core.cacheKey(request))?.etag == "W/\"v1\"")
+    #expect(
+      await store.entry(forKey: server.core.cacheKey(request, credential: "test-secret-key"))?.etag
+        == "W/\"v1\"")
   }
 
   @Test func anUnreadableKeptAnswerIsAMiss() async throws {
@@ -193,7 +195,7 @@ import Testing
       CacheEntry(
         body: "{", etag: "W/\"v0\"", cacheControl: "private, max-age=600", age: nil,
         receivedAt: Date()),
-      forKey: server.core.cacheKey(request), timeToLive: 600)
+      forKey: server.core.cacheKey(request, credential: "test-secret-key"), timeToLive: 600)
 
     let check = try await server.customer("ada").check("priority_support")
 
@@ -213,7 +215,7 @@ import Testing
   @Test func theCacheKeyHoldsNoCredential() throws {
     let server = try FakeAPI([]).server()
     let request = try Wire.entitlementsListEntitlements.request(["customer.external_id": "ada"])
-    let key = server.core.cacheKey(request)
+    let key = server.core.cacheKey(request, credential: "test-secret-key")
     #expect(key.count == 64)
     #expect(!key.contains("test-secret-key"))
   }

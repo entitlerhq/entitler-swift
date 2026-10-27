@@ -78,6 +78,13 @@ enum Messages {
   static let asOf = "Pass asOf as a valid date."
   static let dots = "Pass an id that is not made only of dots."
   static let timeout = "Pass timeout as a number of seconds above 0."
+  static let customerToken = "Provide a customer token minted by your server."
+  static let publishableKey = "Provide a publishable key from the dashboard."
+  static let identityToken = "Provide the identity token your sign-in provider issued."
+  static let tokenFailed = "The token provider failed."
+  static let tokenBlank =
+    "The token provider answered a blank token, or one that can't go in a header."
+  static let tokenRefused = "The token provider answered a token Entitler refused."
   static let me = "me names the signed-in customer, which only an app's client has."
   static let ttlToken = "Pass ttlSeconds as a whole number from 60 to 3600."
   static let hold = "Provide the id of the hold."
