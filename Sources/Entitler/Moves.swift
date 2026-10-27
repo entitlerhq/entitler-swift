@@ -49,6 +49,8 @@ public struct MoveResult: Hashable, Sendable {
   public let money: OpenName
   /// What the move changed, or `nil`.
   public let change: PlanChange?
+  /// What the customer holds after the move, or `nil`.
+  public let holdings: Holdings?
 }
 
 /// The answer to a move.
@@ -407,5 +409,5 @@ func decodeMove(_ body: Data) throws -> MoveStep {
           effective: openName($0.effective, prefix: "EFFECTIVE_"), at: date($0.at),
           until: $0.until.map(date), changed: $0.changed,
           policy: openName($0.policy, prefix: "SUBSCRIPTION_MOVE_POLICY_"))
-      }))
+      }, holdings: try at("holdings") { try done.holdings.map(holdings) }))
 }

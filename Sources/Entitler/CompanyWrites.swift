@@ -275,7 +275,7 @@ private func grantedValue(_ value: Wire.GrantValue?) throws -> FeatureValue {
   return amount(limit(try at("limit") { try given(value.limit) }))
 }
 
-private func grant(_ value: Wire.Grant) throws -> Grant {
+func grant(_ value: Wire.Grant) throws -> Grant {
   Grant(
     id: value.id, feature: value.featureKey,
     value: try at("value") { try grantedValue(value.value) },

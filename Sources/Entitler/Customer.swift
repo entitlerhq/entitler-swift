@@ -124,7 +124,7 @@ extension Customer {
   }
 }
 
-private func asOfQuery(_ asOf: Date?) throws -> [(name: String, value: String)] {
+func asOfQuery(_ asOf: Date?) throws -> [(name: String, value: String)] {
   guard let asOf else { return [] }
   guard asOf.timeIntervalSince1970 >= 0,
     let seconds = Int64(exactly: asOf.timeIntervalSince1970.rounded(.down))

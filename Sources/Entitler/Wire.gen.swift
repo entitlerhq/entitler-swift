@@ -42,6 +42,26 @@ enum Wire {
     var `since`: Int64
     var `versionNumber`: Int64
   }
+  struct BilledProduct: Decodable, Sendable {
+    var `connectionId`: String
+    var `drift`: BillingDrift?
+    var `items`: Int64
+    var `productId`: String?
+    var `renews`: Bool
+    var `sku`: BilledSku?
+    var `status`: ProviderSubscriptionStatus
+  }
+  struct BilledSku: Decodable, Sendable {
+    var `periodId`: String?
+    var `price`: ListingPrice?
+    var `priceId`: String
+  }
+  struct BillingDrift: Decodable, Sendable {
+    var `billedPlanId`: String
+    var `heldPlanId`: String?
+    var `observedAt`: Int64
+    var `productId`: String?
+  }
   struct CancelPendingAddOnChangeResponse: Decodable, Sendable {
     var `confirming`: PaymentConfirming?
     var `done`: MoveResult?
@@ -85,6 +105,9 @@ enum Wire {
   struct CreateHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
+  struct CreatePortalSessionResponse: Decodable, Sendable {
+    var `url`: String
+  }
   struct CreateSnapshotResponse: Decodable, Sendable {
     var `expiresAt`: Int64
     var `keyId`: String
@@ -116,6 +139,16 @@ enum Wire {
   struct CustomerAttribute: Decodable, Sendable {
     var `key`: String
     var `value`: String
+  }
+  struct CustomerBilling: Decodable, Sendable {
+    var `connectionId`: String?
+    var `drift`: BillingDrift?
+    var `items`: Int64
+    var `linked`: Bool
+    var `products`: [BilledProduct]
+    var `renews`: Bool
+    var `sku`: BilledSku?
+    var `status`: ProviderSubscriptionStatus
   }
   struct CustomerLineDiscount: Decodable, Sendable {
     var `amount`: Amount?
@@ -192,6 +225,12 @@ enum Wire {
     var `firstAfterMonths`: Int64
     var `months`: Int64
   }
+  struct FeatureImpact: Decodable, Sendable {
+    var `featureKey`: String
+    var `from`: FeatureValue?
+    var `kind`: ImpactKind
+    var `to`: FeatureValue?
+  }
   struct FeatureValue: Decodable, Sendable {
     var `configuration`: Limit?
     var `group`: GroupValue?
@@ -204,6 +243,9 @@ enum Wire {
     var `everyMonths`: EveryMonths?
     var `onPurchase`: OnPurchase?
     var `yearlyOn`: YearlyOn?
+  }
+  struct GetBillingResponse: Decodable, Sendable {
+    var `billing`: CustomerBilling?
   }
   struct GetCustomerPricingResponse: Decodable, Sendable {
     var `prices`: CustomerPrices?
@@ -311,6 +353,7 @@ enum Wire {
     var `grants`: [Grant]
     var `lanes`: [LaneHolding]
   }
+  typealias ImpactKind = String
   struct LaneHolding: Decodable, Sendable {
     var `addOns`: [HeldAddOn]
     var `billed`: BilledPlan?
@@ -337,6 +380,12 @@ enum Wire {
   struct Limit: Decodable, Sendable {
     var `count`: Int64?
     var `unlimited`: Unlimited?
+  }
+  struct ListAvailablePlansResponse: Decodable, Sendable {
+    var `asOf`: Int64
+    var `customerId`: String?
+    var `holdings`: Holdings?
+    var `options`: [PlanOption]
   }
   struct ListEntitlementsResponse: Decodable, Sendable {
     var `asOf`: Int64
@@ -381,6 +430,7 @@ enum Wire {
     var `money`: CustomerMoney
     var `revision`: Int64
   }
+  typealias MoveTiming = String
   struct NextCharge: Decodable, Sendable {
     var `amount`: Amount?
     var `at`: Int64
@@ -393,6 +443,7 @@ enum Wire {
     var `planId`: String
   }
   struct OnPurchase: Decodable, Sendable {}
+  typealias OptionKind = String
   struct PaymentConfirming: Decodable, Sendable {}
   typealias PaymentProvider = String
   struct PaymentStep: Decodable, Sendable {
@@ -427,6 +478,7 @@ enum Wire {
     var `quantity`: Int64?
     var `until`: Int64?
   }
+  typealias PlanDirection = String
   struct PlanItem: Decodable, Sendable {
     var `bank`: Limit?
     var `benefitThousandths`: Int64?
@@ -437,6 +489,19 @@ enum Wire {
   struct PlanListing: Decodable, Sendable {
     var `channels`: [PricedChannel]
     var `periodId`: String?
+  }
+  struct PlanOption: Decodable, Sendable {
+    var `direction`: PlanDirection
+    var `impact`: [FeatureImpact]
+    var `kind`: OptionKind
+    var `periodIds`: [String]
+    var `planId`: String
+    var `planKey`: String
+    var `planName`: String
+    var `productId`: String?
+    var `replacesPlanId`: String?
+    var `selling`: Selling
+    var `timing`: MoveTiming
   }
   typealias PlanPriceState = String
   struct PlanSource: Decodable, Sendable {
@@ -519,6 +584,7 @@ enum Wire {
     var `served`: ServedCatalogue?
     var `testers`: Bool
   }
+  typealias ProviderSubscriptionStatus = String
   struct QuantityRule: Decodable, Sendable {
     var `max`: Int64?
     var `min`: Int64
@@ -552,6 +618,7 @@ enum Wire {
     var `rolloutId`: String
     var `versionNumber`: Int64
   }
+  typealias Selling = String
   struct ServedCatalogue: Decodable, Sendable {
     var `changeId`: String?
     var `nothing`: NothingServed?
@@ -596,6 +663,9 @@ enum Wire {
     var `subscriptionId`: String
   }
   struct SwitchOn: Decodable, Sendable {}
+  struct SyncBillingResponse: Decodable, Sendable {
+    var `changed`: Bool
+  }
   typealias TermThen = String
   struct TrackedUsage: Decodable, Sendable {
     var `asOf`: Int64
@@ -650,6 +720,13 @@ enum Wire {
     var `dates`: [YearlyDate]
   }
 
+  static let billingCreatePortalSession = Route(
+    method: "POST", path: "/v1/customers/{external_id}/billing/portal-sessions", query: [])
+  static let billingGetBilling = Route(
+    method: "GET", path: "/v1/customers/{external_id}/billing",
+    query: ["target.team_id", "target.project_id", "target.environment_id"])
+  static let billingSyncBilling = Route(
+    method: "POST", path: "/v1/customers/{external_id}/billing:sync", query: [])
   static let customerTokensCreateToken = Route(
     method: "POST", path: "/v1/customers/{external_id}/tokens", query: [])
   static let customerTracksAssignTrack = Route(
@@ -691,6 +768,9 @@ enum Wire {
     method: "POST", path: "/v1/customers/{external_id}/subscription:cancel", query: [])
   static let subscriptionsChooseSubscription = Route(
     method: "POST", path: "/v1/customers/{external_id}/subscription", query: [])
+  static let subscriptionsListAvailablePlans = Route(
+    method: "GET", path: "/v1/customers/{external_id}/plans",
+    query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
   static let subscriptionsRemoveAddOn = Route(
     method: "POST", path: "/v1/customers/{external_id}/add-ons/{plan_key}:remove", query: [])
   static let subscriptionsSetAddOn = Route(

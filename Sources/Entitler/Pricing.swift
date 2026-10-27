@@ -373,7 +373,7 @@ func languageTag(_ locale: Locale) throws -> String {
   return tag
 }
 
-private func amount(_ value: Wire.Amount) -> Amount {
+func amount(_ value: Wire.Amount) -> Amount {
   Amount(amount: value.amount, currency: value.currency, display: value.display)
 }
 
@@ -416,12 +416,14 @@ private func channel(_ value: Wire.PricedChannel) -> PricedChannel {
     connectionID: value.connectionId, name: value.name,
     mode: openName(value.mode, prefix: "CONNECTION_MODE_"), purchasable: value.purchasable,
     ids: listingIDs(value.ids),
-    price: value.price.map {
-      ListingPrice(
-        amount: $0.amount, currency: $0.currency,
-        interval: openName($0.interval, prefix: "LISTING_PRICE_INTERVAL_"),
-        intervalCount: $0.intervalCount, tax: openName($0.tax, prefix: "LISTING_TAX_BEHAVIOUR_"))
-    })
+    price: value.price.map(listingPrice))
+}
+
+func listingPrice(_ value: Wire.ListingPrice) -> ListingPrice {
+  ListingPrice(
+    amount: value.amount, currency: value.currency,
+    interval: openName(value.interval, prefix: "LISTING_PRICE_INTERVAL_"),
+    intervalCount: value.intervalCount, tax: openName(value.tax, prefix: "LISTING_TAX_BEHAVIOUR_"))
 }
 
 private func pricedPlan(_ value: Wire.PricedPlan) throws -> PricedPlan {
