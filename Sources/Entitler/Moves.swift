@@ -216,7 +216,7 @@ extension ServerCustomer {
   @discardableResult
   public func setPlan(
     _ plan: String, period: String? = nil, when: MoveTiming? = nil, until: Date? = nil,
-    offers: [OfferChoice]? = nil, market: String? = nil, country: String? = nil,
+    offers: [OfferChoice] = [], market: String? = nil, country: String? = nil,
     latestVersion: Bool = false, keepBilling: Bool = false, endBilling: Bool = false,
     waiveExitCharges: Bool = false, register: Bool = false, reason: String? = nil,
     expectedRevision: Int64? = nil, timeout: TimeInterval? = nil
@@ -224,7 +224,8 @@ extension ServerCustomer {
     var body = MoveBody(
       set: PlanKey(planKey: try require(plan, Messages.plan)), periodId: period,
       when: when.map(moveWhen), until: try until.map { try epochSeconds($0, Messages.until) },
-      offers: try offers?.map(offerChoice), latestVersion: flag(latestVersion),
+      offers: offers.isEmpty ? nil : try offers.map(offerChoice),
+      latestVersion: flag(latestVersion),
       keepBilling: flag(keepBilling), endBilling: flag(endBilling),
       waiveExitCharges: flag(waiveExitCharges), register: flag(register))
     try body.place(market: market, country: country)
