@@ -257,4 +257,17 @@ import Testing
 
     #expect(api.requests.count == 3)
   }
+
+  @Test func aWriteThatMayHaveLandedStillDropsTheKeptAnswers() async throws {
+    let kept = Answer(headers: ["Cache-Control": "private, max-age=600"], body: switchCheck)
+    let api = FakeAPI([kept, Answer(failure: .timedOut), kept])
+    let ada = try api.server(options: EntitlerOptions(maxRetries: 0)).customer("ada")
+    _ = try await ada.check("priority_support")
+    await #expect(throws: EntitlerError.self) {
+      try await ada.recordUsage(of: "ai_credits", amount: 1, idempotencyKey: "m-1")
+    }
+    _ = try await ada.check("priority_support")
+
+    #expect(api.requests.count == 3)
+  }
 }

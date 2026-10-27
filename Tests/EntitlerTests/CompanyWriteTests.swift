@@ -40,6 +40,17 @@ let grantJSON = #"""
     #expect(result.grant.revokedBy == nil)
   }
 
+  @Test func aGrantDropsTheCustomersKeptAnswers() async throws {
+    let kept = Answer(headers: ["Cache-Control": "private, max-age=600"], body: switchCheck)
+    let api = FakeAPI([kept, Answer(body: #"{"grant": \#(grantJSON), "revision": 7}"#), kept])
+    let ada = try api.server().customer("ada")
+    _ = try await ada.check("priority_support")
+    _ = try await ada.grant("ai_credits", value: .amount(5_000))
+    _ = try await ada.check("priority_support")
+
+    #expect(api.requests.count == 3)
+  }
+
   @Test func aGrantOutOfRangeIsRefusedBeforeAnyRequest() async throws {
     let api = FakeAPI([])
     let customer = try api.server().customer("ada")
