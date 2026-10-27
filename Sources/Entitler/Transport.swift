@@ -41,6 +41,7 @@ struct Request: Sendable {
   var idempotencyKey: String? = nil
   var retryable: Bool? = nil
   var open = false
+  var headers: [String: String] = [:]
 
   var isRetryable: Bool { retryable ?? ["GET", "PUT", "DELETE"].contains(method) }
 }
@@ -403,9 +404,10 @@ final class Core: Sendable, CustomReflectable {
   }
 
   func cacheKey(_ request: Request, credential: String) -> String {
-    let parts = [
-      "entitler-cache-v2", request.method, urlString(for: request), "key", sha256(credential),
-    ]
+    let parts =
+      [
+        "entitler-cache-v2", request.method, urlString(for: request), "key", sha256(credential),
+      ] + request.headers.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] }
     return sha256("[" + parts.map(jsonString).joined(separator: ",") + "]")
   }
 
@@ -429,7 +431,7 @@ final class Core: Sendable, CustomReflectable {
         url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
       urlRequest.httpMethod = request.method
       urlRequest.httpBody = request.body
-      for (name, value) in headers(etag: etag, body: request.body != nil, auth: current) {
+      for (name, value) in headers(request, etag: etag, auth: current) {
         urlRequest.setValue(value, forHTTPHeaderField: name)
       }
       let failure: EntitlerError
@@ -521,11 +523,12 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func headers(etag: String?, body: Bool, auth: Authorised) -> [String: String] {
+  private func headers(_ request: Request, etag: String?, auth: Authorised) -> [String: String] {
     var headers = ["Accept": "application/json", "User-Agent": userAgent]
+    headers.merge(request.headers) { $1 }
     headers.merge(auth.headers) { $1 }
     if let etag { headers["If-None-Match"] = etag }
-    if body { headers["Content-Type"] = "application/json" }
+    if request.body != nil { headers["Content-Type"] = "application/json" }
     return headers
   }
 

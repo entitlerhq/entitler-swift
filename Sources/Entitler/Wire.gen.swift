@@ -10,6 +10,15 @@ enum Wire {
     var `value`: FeatureValue?
     var `versionNumber`: Int64
   }
+  struct Amount: Decodable, Sendable {
+    var `amount`: Int64
+    var `currency`: String
+    var `display`: String
+  }
+  struct AppleListingIds: Decodable, Sendable {
+    var `productId`: String
+    var `subscriptionGroupId`: String?
+  }
   struct CheckFeatureResponse: Decodable, Sendable {
     var `asOf`: Int64
     var `customer`: EntitledCustomer?
@@ -17,6 +26,7 @@ enum Wire {
     var `nextChangeAt`: Int64?
     var `served`: ServedCatalogue?
   }
+  typealias ConnectionMode = String
   struct CreateHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
@@ -52,7 +62,31 @@ enum Wire {
     var `key`: String
     var `value`: String
   }
+  struct CustomerLineDiscount: Decodable, Sendable {
+    var `amount`: Amount?
+    var `offerId`: String
+    var `offerKey`: String
+    var `offerName`: String
+  }
   typealias CustomerMoney = String
+  struct CustomerPriceLine: Decodable, Sendable {
+    var `discounts`: [CustomerLineDiscount]
+    var `listPrice`: Amount?
+    var `periodId`: String?
+    var `planId`: String
+    var `price`: Amount?
+    var `quantity`: Int64
+    var `state`: PlanPriceState
+    var `unitPrice`: Amount?
+    var `version`: Int64
+  }
+  struct CustomerPriceLines: Decodable, Sendable {
+    var `lines`: [CustomerPriceLine]
+  }
+  struct CustomerPrices: Decodable, Sendable {
+    var `market`: PricingMarket?
+    var `subscriptions`: [SubscriptionPrice]
+  }
   typealias CustomerTokenScope = String
   struct DefaultPlanSource: Decodable, Sendable {
     var `planId`: String
@@ -88,6 +122,10 @@ enum Wire {
   struct EraseCustomerResponse: Decodable, Sendable {
     var `erased`: Int64
   }
+  struct EveryMonths: Decodable, Sendable {
+    var `firstAfterMonths`: Int64
+    var `months`: Int64
+  }
   struct FeatureValue: Decodable, Sendable {
     var `configuration`: Limit?
     var `group`: GroupValue?
@@ -95,8 +133,27 @@ enum Wire {
     var `money`: MarketLimits?
     var `switch`: Bool?
   }
+  typealias FeeDirection = String
+  struct FeeSchedule: Decodable, Sendable {
+    var `everyMonths`: EveryMonths?
+    var `onPurchase`: OnPurchase?
+    var `yearlyOn`: YearlyOn?
+  }
+  struct GetCustomerPricingResponse: Decodable, Sendable {
+    var `prices`: CustomerPrices?
+    var `pricing`: PricingSheet?
+  }
   struct GetCustomerResponse: Decodable, Sendable {
     var `customer`: Customer?
+  }
+  struct GetPricingResponse: Decodable, Sendable {
+    var `pricing`: PricingSheet?
+  }
+  struct GoogleListingIds: Decodable, Sendable {
+    var `basePlanId`: String?
+    var `offerId`: String?
+    var `productId`: String
+    var `purchaseOptionId`: String?
   }
   struct GrantSource: Decodable, Sendable {
     var `grantId`: String
@@ -128,6 +185,20 @@ enum Wire {
     var `nextChangeAt`: Int64?
     var `served`: ServedCatalogue?
   }
+  struct ListingIds: Decodable, Sendable {
+    var `apple`: AppleListingIds?
+    var `google`: GoogleListingIds?
+    var `stripe`: StripeListingIds?
+  }
+  struct ListingPrice: Decodable, Sendable {
+    var `amount`: Int64
+    var `currency`: String
+    var `interval`: ListingPriceInterval
+    var `intervalCount`: Int64
+    var `tax`: ListingTaxBehaviour
+  }
+  typealias ListingPriceInterval = String
+  typealias ListingTaxBehaviour = String
   struct MarketLimit: Decodable, Sendable {
     var `limit`: Limit?
     var `marketId`: String
@@ -135,6 +206,7 @@ enum Wire {
   struct MarketLimits: Decodable, Sendable {
     var `limits`: [MarketLimit]
   }
+  typealias MarketTax = String
   struct Meter: Decodable, Sendable {
     var `banked`: Int64
     var `held`: Int64
@@ -142,7 +214,33 @@ enum Wire {
     var `resetsAt`: Int64?
     var `used`: Int64
   }
+  struct NextCharge: Decodable, Sendable {
+    var `amount`: Amount?
+    var `at`: Int64
+    var `direction`: FeeDirection
+    var `feeKey`: String
+  }
   struct NothingServed: Decodable, Sendable {}
+  struct OnPurchase: Decodable, Sendable {}
+  typealias PaymentProvider = String
+  struct PeriodPrice: Decodable, Sendable {
+    var `bands`: [PricedBand]
+    var `periodId`: String?
+    var `price`: Amount?
+  }
+  typealias PeriodUnit = String
+  struct PlanItem: Decodable, Sendable {
+    var `bank`: Limit?
+    var `benefitThousandths`: Int64?
+    var `featureKey`: String
+    var `value`: FeatureValue?
+  }
+  typealias PlanKind = String
+  struct PlanListing: Decodable, Sendable {
+    var `channels`: [PricedChannel]
+    var `periodId`: String?
+  }
+  typealias PlanPriceState = String
   struct PlanSource: Decodable, Sendable {
     var `planId`: String
     var `planKey`: String
@@ -151,6 +249,81 @@ enum Wire {
     var `throughFeatureKey`: String?
     var `value`: FeatureValue?
     var `versionNumber`: Int64
+  }
+  typealias PlanStatus = String
+  struct PricedBand: Decodable, Sendable {
+    var `amount`: Amount?
+    var `perUnit`: Bool
+    var `upTo`: Int64?
+  }
+  struct PricedChannel: Decodable, Sendable {
+    var `connectionId`: String
+    var `ids`: ListingIds?
+    var `mode`: ConnectionMode
+    var `name`: String
+    var `price`: ListingPrice?
+    var `provider`: PaymentProvider
+    var `purchasable`: Bool
+  }
+  struct PricedFee: Decodable, Sendable {
+    var `direction`: FeeDirection
+    var `key`: String
+    var `name`: String
+    var `price`: Amount?
+    var `schedule`: FeeSchedule?
+  }
+  struct PricedPeriod: Decodable, Sendable {
+    var `count`: Int64
+    var `id`: String
+    var `key`: String
+    var `label`: String
+    var `unit`: PeriodUnit
+  }
+  struct PricedPlan: Decodable, Sendable {
+    var `availableOn`: [String]
+    var `byDefault`: Bool
+    var `description`: String
+    var `fees`: [PricedFee]
+    var `id`: String
+    var `items`: [PlanItem]
+    var `key`: String
+    var `kind`: PlanKind
+    var `listings`: [PlanListing]
+    var `name`: String
+    var `periods`: [PricedPeriod]
+    var `priceState`: PlanPriceState
+    var `prices`: [PeriodPrice]
+    var `productId`: String?
+    var `quantity`: QuantityRule?
+    var `salesLed`: Bool
+    var `status`: PlanStatus
+    var `trial`: TrialLength?
+    var `versionNumber`: Int64
+  }
+  struct PricedProduct: Decodable, Sendable {
+    var `defaultPlanId`: String?
+    var `id`: String
+    var `key`: String
+    var `name`: String
+  }
+  struct PricingMarket: Decodable, Sendable {
+    var `currency`: String
+    var `id`: String
+    var `key`: String
+    var `name`: String
+    var `tax`: MarketTax
+  }
+  struct PricingSheet: Decodable, Sendable {
+    var `customer`: String?
+    var `market`: PricingMarket?
+    var `plans`: [PricedPlan]
+    var `products`: [PricedProduct]
+    var `served`: ServedCatalogue?
+    var `testers`: Bool
+  }
+  struct QuantityRule: Decodable, Sendable {
+    var `max`: Int64?
+    var `min`: Int64
   }
   struct RegisterCustomerResponse: Decodable, Sendable {
     var `created`: Bool
@@ -182,12 +355,27 @@ enum Wire {
   struct SnapshotKeySet: Decodable, Sendable {
     var `keys`: [[String: String]]
   }
+  struct StripeListingIds: Decodable, Sendable {
+    var `priceId`: String
+  }
+  struct SubscriptionPrice: Decodable, Sendable {
+    var `atRenewal`: CustomerPriceLines?
+    var `nextCharges`: [NextCharge]
+    var `now`: [CustomerPriceLine]
+    var `productId`: String?
+    var `renewsAt`: Int64
+    var `subscriptionId`: String
+  }
   struct TrackedUsage: Decodable, Sendable {
     var `asOf`: Int64
     var `customer`: EntitledCustomer?
     var `entitlement`: Entitlement?
     var `served`: ServedCatalogue?
     var `usage`: UsageResult?
+  }
+  struct TrialLength: Decodable, Sendable {
+    var `days`: Int64?
+    var `months`: Int64?
   }
   struct Unlimited: Decodable, Sendable {}
   struct UpdateCustomerResponse: Decodable, Sendable {
@@ -223,6 +411,13 @@ enum Wire {
     var `saturated`: Bool
     var `usageId`: String?
   }
+  struct YearlyDate: Decodable, Sendable {
+    var `day`: Int64
+    var `month`: Int64
+  }
+  struct YearlyOn: Decodable, Sendable {
+    var `dates`: [YearlyDate]
+  }
 
   static let customerTokensCreateToken = Route(
     method: "POST", path: "/v1/customers/{external_id}/tokens", query: [])
@@ -241,6 +436,12 @@ enum Wire {
   static let entitlementsListEntitlements = Route(
     method: "GET", path: "/v1/customers/{external_id}/entitlements",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
+  static let pricingGetCustomerPricing = Route(
+    method: "GET", path: "/v1/customers/{external_id}/pricing",
+    query: ["target.team_id", "target.project_id", "target.environment_id"])
+  static let pricingGetPricing = Route(
+    method: "GET", path: "/v1/pricing",
+    query: ["target.team_id", "target.project_id", "target.environment_id", "market", "country"])
   static let snapshotKeys = Route(method: "GET", path: "/v1/snapshot-keys", query: [])
   static let snapshotsCreateSnapshot = Route(
     method: "POST", path: "/v1/customers/{external_id}/snapshots", query: [])

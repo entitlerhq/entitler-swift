@@ -52,6 +52,25 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
     return ServerCustomer(id: given, handle: CustomerHandle(core: core))
   }
 
+  /// Reads the plans on sale on the default track, priced in `market`, or in `country`'s market.
+  /// With neither, the plans come with no prices.
+  ///
+  /// - Parameters:
+  ///   - market: The key of the market to price the plans in.
+  ///   - country: The ISO 3166-1 country code whose market prices the plans, when `market` is
+  ///     left out.
+  ///   - locale: The locale to format amounts' `display` for, sent as `Accept-Language`.
+  ///   - revalidate: Asks Entitler whether a kept answer still stands before using it.
+  ///   - timeout: How long each attempt may take, in seconds, instead of the client's timeout.
+  public func pricing(
+    market: String? = nil, country: String? = nil, locale: Locale? = nil,
+    revalidate: Bool = false, timeout: TimeInterval? = nil
+  ) async throws -> PricingSheet {
+    try await Entitler.pricing(
+      core, market: market, country: country, locale: locale, revalidate: revalidate,
+      timeout: timeout)
+  }
+
   /// The public keys that verify snapshots. Sent with no credential.
   public func snapshotKeys(timeout: TimeInterval? = nil) async throws -> SnapshotKeySet {
     try await Entitler.snapshotKeys(core, timeout: timeout)

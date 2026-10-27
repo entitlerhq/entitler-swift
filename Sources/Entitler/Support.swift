@@ -94,5 +94,6 @@ enum Messages {
   static let ttlSeconds = "Pass ttlSeconds as a whole number from 1 to 3600."
   static let occurredAt = "Pass occurredAt as a valid date."
   static let snapshotLifetime = "Pass ttlSeconds as a whole number from 60 to 2592000."
+  static let locale = "Pass locale as a valid BCP 47 language tag."
   static let clockSkew = "Pass clockSkewSeconds as a whole number from 0 to 300."
 }
