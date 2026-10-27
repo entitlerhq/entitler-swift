@@ -366,7 +366,7 @@ extension Customer {
     if answer.outcome == .refused {
       throw EntitlerError.usageRefused(UsageRefusedError(result: answer))
     }
-    guard let id = answer.holdID, let expiresAt = answer.expiresAt,
+    guard let id = answer.holdID, !id.trimmed.isEmpty, let expiresAt = answer.expiresAt,
       answer.outcome == .held || (answer.outcome == .duplicate && expiresAt > answer.asOf)
     else { throw EntitlerError.usageReplayed(UsageReplayedError(result: answer)) }
     return Hold(
