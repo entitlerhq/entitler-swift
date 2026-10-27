@@ -22,6 +22,9 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   case connection(ConnectionError)
   /// An attempt took longer than its timeout.
   case timeout(TimeoutError)
+  /// The in-app client's token provider failed, timed out, or answered a blank token or one
+  /// Entitler refused.
+  case token(TokenError)
   /// A hold was refused: the customer is not entitled, or has too little left.
   case usageRefused(UsageRefusedError)
   /// A hold's idempotency key repeated a hold that is already settled, released or expired.
@@ -38,17 +41,18 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .api(let error): error.description
     case .connection(let error): error.message
     case .timeout(let error): error.message
+    case .token(let error): error.message
     case .usageRefused(let error): error.message
     case .usageReplayed(let error): error.message
     case .usageSettlement(let error): error.message
     }
   }
 
-  /// True when Entitler could not be reached: no answer, a timeout, a `408`, a `429`, a `5xx` or
-  /// an answer this SDK cannot read. An app that can work offline falls back to its last known answer.
+  /// True when Entitler could not be reached: no answer, a timeout, a token provider failing
+  /// (offline, typically), a `408`, a `429`, a `5xx` or an answer this SDK cannot read. An app that can work offline falls back to its last known answer.
   public var isUnreachable: Bool {
     switch self {
-    case .connection, .timeout: true
+    case .connection, .timeout, .token: true
     case .api(let error):
       [408, 429].contains(error.status) || error.status >= 500 || error.reason == .responseInvalid
     case .usageRefused, .usageReplayed, .usageSettlement: false
@@ -230,6 +234,21 @@ public struct UsageSettlementError: Error, Sendable, LocalizedError, CustomStrin
     return
       "Hold \(holdID) expired with nothing used, and Entitler could not confirm its release. Nothing is owed."
   }
+
+  /// The message.
+  public var errorDescription: String? { message }
+
+  /// The message.
+  public var description: String { message }
+}
+
+/// The in-app client's token provider failed, timed out, or answered a blank token or one
+/// Entitler refused.
+public struct TokenError: Error, Sendable, LocalizedError, CustomStringConvertible {
+  /// What went wrong.
+  public let message: String
+  /// The provider's own error, kept as it is, or `nil`.
+  public let underlyingError: (any Error)?
 
   /// The message.
   public var errorDescription: String? { message }

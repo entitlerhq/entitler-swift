@@ -24,14 +24,16 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
     key: String, cache: (any CacheStore)? = MemoryCacheStore(capacity: 1_000),
     options: EntitlerOptions = EntitlerOptions()
   ) throws {
-    core = try Core(options: options, cache: cache, key: requireCredential(key, Messages.key))
+    core = try Core(
+      options: options, cache: cache, credentials: .key(requireCredential(key, Messages.key)))
   }
 
   init(
     key: String, cache: (any CacheStore)?, options: EntitlerOptions,
     exchange: @escaping Exchange, hooks: Hooks
   ) throws {
-    core = try Core(options: options, cache: cache, key: key, exchange: exchange, hooks: hooks)
+    core = try Core(
+      options: options, cache: cache, credentials: .key(key), exchange: exchange, hooks: hooks)
   }
 
   /// The customer with the id your app uses for them. Makes no request.

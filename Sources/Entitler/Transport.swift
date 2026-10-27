@@ -52,6 +52,7 @@ struct Response: Sendable {
   let age: Int?
   var requestID: String? = nil
   var retried = false
+  var refreshed: Authorised? = nil
 
   var noStore: Bool { hasCacheDirective("no-store", in: cacheControl) }
 }
@@ -160,25 +161,44 @@ extension Optional {
     configuration: configuration, delegate: RedirectRefuser.shared, delegateQueue: nil)
 }()
 
+struct Authorised: Sendable {
+  let headers: [String: String]
+  let credential: String
+  let token: String
+}
+
+struct Credentials: Sendable {
+  let authorise: @Sendable () async throws -> Authorised
+  var refuse: (@Sendable (Authorised) async -> Void)? = nil
+  var cancel: (@Sendable () -> Void)? = nil
+
+  static func key(_ key: String) -> Credentials {
+    let authorised = Authorised(
+      headers: ["Authorization": "Bearer \(key)"], credential: key, token: key)
+    return Credentials(authorise: { authorised })
+  }
+}
+
 final class Core: Sendable, CustomReflectable {
   let options: EntitlerOptions
   let cache: (any CacheStore)?
-  let key: String
+  let credentials: Credentials
   let exchange: Exchange?
   let hooks: Hooks
   let state = ClientState()
+  private let lastAuthorised = LockedValue<Authorised?>(nil)
   private let closed = LockedValue(false)
   private let running = LockedValue<[UInt64: @Sendable () -> Void]>([:])
   private let counter = LockedValue<UInt64>(0)
 
   init(
-    options: EntitlerOptions, cache: (any CacheStore)?, key: String, exchange: Exchange? = nil,
-    hooks: Hooks = Hooks()
+    options: EntitlerOptions, cache: (any CacheStore)?, credentials: Credentials,
+    exchange: Exchange? = nil, hooks: Hooks = Hooks()
   ) throws {
     _ = try validTimeout(options.timeout)
     self.options = options
     self.cache = cache
-    self.key = key
+    self.credentials = credentials
     self.exchange = exchange
     self.hooks = hooks
   }
@@ -186,6 +206,7 @@ final class Core: Sendable, CustomReflectable {
   func close() {
     guard !closed.swap(true) else { return }
     for cancel in running.swap([:]).values { cancel() }
+    credentials.cancel?()
     if let memory = cache as? MemoryCacheStore { Task { await memory.removeAll() } }
   }
 
@@ -228,7 +249,9 @@ final class Core: Sendable, CustomReflectable {
   ) async throws -> Answer {
     _ = try request.timeout.map(validTimeout)
     guard let cache else {
-      return try await guarded { [self] in try decoded(await send(request), decode) }
+      return try await guarded { [self] in
+        try decoded(await send(request, auth: authorise()), decode)
+      }
     }
     return try await guarded { [self] in
       try await cachedAnswer(request, cache: cache, decode: decode)
@@ -240,7 +263,7 @@ final class Core: Sendable, CustomReflectable {
   ) async throws -> (answer: Answer, retried: Bool) {
     _ = try request.timeout.map(validTimeout)
     return try await guarded { [self] in
-      let response = try await send(request)
+      let response = try await send(request, auth: authorise())
       return (
         try decoded(response, decode, idempotencyKey: request.idempotencyKey), response.retried
       )
@@ -262,10 +285,28 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
+  private func authorise() async throws -> Authorised {
+    let auth = try await credentials.authorise()
+    lastAuthorised.update { $0 = auth }
+    return auth
+  }
+
   private func cachedAnswer<Answer>(
     _ request: Request, cache: any CacheStore, decode: (Data) throws -> Answer
   ) async throws -> Answer {
-    let key = cacheKey(request)
+    let auth: Authorised
+    do {
+      auth = try await authorise()
+    } catch let error as EntitlerError where error.isUnreachable {
+      guard let last = lastAuthorised.read(),
+        let kept = await entry(cacheKey(request, credential: last.credential), in: cache),
+        hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor,
+        let keptAnswer = try? decode(Data(kept.body.utf8))
+      else { throw error }
+      report(error)
+      return markedStale(keptAnswer)
+    }
+    let key = cacheKey(request, credential: auth.credential)
     var kept = await entry(key, in: cache)
     var keptAnswer: Answer?
     if let entry = kept {
@@ -287,7 +328,8 @@ final class Core: Sendable, CustomReflectable {
       if outage == .serveKept { return markedStale(keptAnswer) }
     }
     do {
-      let answer = try await askAPI(request, key: key, kept: kept, cache: cache, decode: decode)
+      let answer = try await askAPI(
+        request, auth: auth, key: key, kept: kept, cache: cache, decode: decode)
       if outage == .probe { await state.endProbe() }
       return answer
     } catch {
@@ -297,11 +339,11 @@ final class Core: Sendable, CustomReflectable {
   }
 
   private func askAPI<Answer>(
-    _ request: Request, key: String, kept: CacheEntry?, cache: any CacheStore,
+    _ request: Request, auth: Authorised, key: String, kept: CacheEntry?, cache: any CacheStore,
     decode: (Data) throws -> Answer
   ) async throws -> Answer {
     do {
-      let response = try await send(request, ifNoneMatch: kept?.etag)
+      let response = try await send(request, auth: auth, ifNoneMatch: kept?.etag)
       let receivedAt = await state.stamp(hooks.now())
       var entry: CacheEntry?
       if response.status == 304, let kept {
@@ -318,7 +360,11 @@ final class Core: Sendable, CustomReflectable {
       }
       let answer = try decoded(
         response.status == 304 ? entry.map(Response.init) ?? response : response, decode)
-      if let entry, !response.noStore { await store(entry, key: key, in: cache) }
+      if let entry, !response.noStore {
+        let storeKey =
+          response.refreshed.map { cacheKey(request, credential: $0.credential) } ?? key
+        await store(entry, key: storeKey, in: cache)
+      }
       return answer
     } catch let error as EntitlerError where error.isUnreachable {
       let retryAfter = error.apiError?.retryAfter ?? 0
@@ -350,8 +396,10 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  func cacheKey(_ request: Request) -> String {
-    let parts = ["entitler-cache-v2", request.method, urlString(for: request), "key", sha256(key)]
+  func cacheKey(_ request: Request, credential: String) -> String {
+    let parts = [
+      "entitler-cache-v2", request.method, urlString(for: request), "key", sha256(credential),
+    ]
     return sha256("[" + parts.map(jsonString).joined(separator: ",") + "]")
   }
 
@@ -362,16 +410,20 @@ final class Core: Sendable, CustomReflectable {
       .joined(separator: "&")
   }
 
-  func send(_ request: Request, ifNoneMatch etag: String? = nil) async throws -> Response {
+  func send(_ request: Request, auth: Authorised, ifNoneMatch etag: String? = nil) async throws
+    -> Response
+  {
     let timeout = try validTimeout(request.timeout ?? options.timeout)
     let url = URL(string: urlString(for: request))!
     var retries = 0
+    var current = auth
+    var refreshed = false
     while true {
       var urlRequest = URLRequest(
         url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
       urlRequest.httpMethod = request.method
       urlRequest.httpBody = request.body
-      for (name, value) in headers(etag: etag, body: request.body != nil) {
+      for (name, value) in headers(etag: etag, body: request.body != nil, auth: current) {
         urlRequest.setValue(value, forHTTPHeaderField: name)
       }
       let failure: EntitlerError
@@ -382,10 +434,18 @@ final class Core: Sendable, CustomReflectable {
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
           await state.reachable()
           response.retried = retries > 0
+          if refreshed { response.refreshed = current }
           return response
         }
         let error = apiError(
           http, body: body, now: hooks.now(), idempotencyKey: request.idempotencyKey)
+        if http.statusCode == 401, let refuse = credentials.refuse {
+          await refuse(current)
+          guard !refreshed else { throw EntitlerError.api(error) }
+          refreshed = true
+          current = try await authorise()
+          continue
+        }
         guard
           [408, 429, 500, 502, 503, 504].contains(http.statusCode) || error.code == "Aborted",
           request.isRetryable, retries < options.maxRetries
@@ -455,10 +515,9 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  private func headers(etag: String?, body: Bool) -> [String: String] {
-    var headers = [
-      "Accept": "application/json", "User-Agent": userAgent, "Authorization": "Bearer \(key)",
-    ]
+  private func headers(etag: String?, body: Bool, auth: Authorised) -> [String: String] {
+    var headers = ["Accept": "application/json", "User-Agent": userAgent]
+    headers.merge(auth.headers) { $1 }
     if let etag { headers["If-None-Match"] = etag }
     if body { headers["Content-Type"] = "application/json" }
     return headers
