@@ -209,7 +209,7 @@ extension ServerCustomer {
   }
 }
 
-private struct Revision: Encodable {
+struct Revision: Encodable {
   var value: Int64
 }
 
@@ -259,7 +259,7 @@ private func grantValue(_ value: FeatureValue) throws -> GrantValueBody {
   }
 }
 
-private func revision(_ value: Int64?) throws -> Revision? {
+func revision(_ value: Int64?) throws -> Revision? {
   guard let value else { return nil }
   guard value >= 0 else { throw ArgumentError(message: Messages.expectedRevision) }
   return Revision(value: value)
