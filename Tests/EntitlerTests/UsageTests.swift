@@ -18,11 +18,11 @@ func usage(
       "asOf": 1790000000,
       "customer": {"externalId": "ada"},
       "entitlement": {"featureKey": "ai_credits", "kind": "ENTITLED_FEATURE_KIND_METERED",
-        "entitled": true, "value": {"metered": {"count": 1000}}, "sources": [], "upgrades": [],
+        "entitled": true, "decimals": 0, "currency": "", "value": {"metered": {"count": 1000}}, "sources": [], "upgrades": [],
         "meter": {"used": 250, "held": 0, "banked": 0, "remaining": {"count": 750}}},
       "usage": {"outcome": "USAGE_OUTCOME_\#(outcome)", "mode": "USAGE_MODE_GATE",
         "amount": \#(amount), "meterChange": 0, "overBy": 0, "late": false,
-        "replayed": false\#(hold)\#(refused)\#(extra)}
+        "replayed": false, "saturated": false\#(hold)\#(refused)\#(extra)}
     }}
     """#
 }

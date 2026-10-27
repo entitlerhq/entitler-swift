@@ -63,6 +63,8 @@ enum Wire {
   }
   typealias EntitledFeatureKind = String
   struct Entitlement: Decodable, Sendable {
+    var `currency`: String
+    var `decimals`: Int64
     var `entitled`: Bool
     var `featureKey`: String
     var `kind`: EntitledFeatureKind
@@ -202,6 +204,7 @@ enum Wire {
     var `overBy`: Int64
     var `refusal`: UsageRefusal?
     var `replayed`: Bool
+    var `saturated`: Bool
     var `usageId`: String?
   }
 

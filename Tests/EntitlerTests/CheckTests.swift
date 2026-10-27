@@ -132,7 +132,7 @@ import Testing
     let api = FakeAPI([
       Answer(
         body: #"""
-          {"asOf": 1790000000, "customer": {"externalId": "ada"}, "entitlement": {"entitled": true,
+          {"asOf": 1790000000, "customer": {"externalId": "ada"}, "entitlement": {"entitled": true, "decimals": 0, "currency": "",
             "kind": "ENTITLED_FEATURE_KIND_SWITCH", "sources": [], "upgrades": []}}
           """#)
     ])
