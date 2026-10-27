@@ -42,6 +42,7 @@ struct Request: Sendable {
   var retryable: Bool? = nil
   var open = false
   var headers: [String: String] = [:]
+  var customer: String? = nil
 
   var isRetryable: Bool { retryable ?? ["GET", "PUT", "DELETE"].contains(method) }
 }
@@ -265,10 +266,13 @@ final class Core: Sendable, CustomReflectable {
   ) async throws -> (answer: Answer, retried: Bool) {
     _ = try request.timeout.map(validTimeout)
     return try await guarded { [self] in
-      let response = try await send(request, auth: authorise(request))
-      return (
-        try decoded(response, decode, idempotencyKey: request.idempotencyKey), response.retried
-      )
+      let auth = try await authorise(request)
+      let response = try await send(request, auth: auth)
+      let answer = try decoded(response, decode, idempotencyKey: request.idempotencyKey)
+      if request.method != "GET", let cache {
+        await renewGeneration(request, credential: (response.refreshed ?? auth).credential, cache)
+      }
+      return (answer, response.retried)
     }
   }
 
@@ -306,14 +310,20 @@ final class Core: Sendable, CustomReflectable {
       auth = try await authorise(request)
     } catch let error as EntitlerError where error.isUnreachable {
       guard let last = lastAuthorised.read(),
-        let kept = await entry(cacheKey(request, credential: last.credential), in: cache),
+        let kept = await entry(
+          cacheKey(
+            request, credential: last.credential,
+            generation: generation(request, credential: last.credential, cache)),
+          in: cache),
         hooks.now().timeIntervalSince(kept.receivedAt) < options.staleFor,
         let keptAnswer = try? decode(Data(kept.body.utf8))
       else { throw error }
       report(error)
       return markedStale(keptAnswer)
     }
-    let key = cacheKey(request, credential: auth.credential)
+    let key = cacheKey(
+      request, credential: auth.credential,
+      generation: await generation(request, credential: auth.credential, cache))
     var kept = await entry(key, in: cache)
     var keptAnswer: Answer?
     if let entry = kept {
@@ -368,8 +378,12 @@ final class Core: Sendable, CustomReflectable {
       let answer = try decoded(
         response.status == 304 ? entry.map(Response.init) ?? response : response, decode)
       if let entry, !response.noStore {
-        let storeKey =
-          response.refreshed.map { cacheKey(request, credential: $0.credential) } ?? key
+        var storeKey = key
+        if let refreshed = response.refreshed {
+          storeKey = cacheKey(
+            request, credential: refreshed.credential,
+            generation: await generation(request, credential: refreshed.credential, cache))
+        }
         await store(entry, key: storeKey, in: cache)
       }
       return answer
@@ -403,11 +417,47 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
-  func cacheKey(_ request: Request, credential: String) -> String {
+  func generation(_ request: Request, credential: String, _ cache: any CacheStore) async
+    -> String?
+  {
+    guard let customer = request.customer else { return nil }
+    if let kept = await entry(generationKey(customer, credential: credential), in: cache),
+      !kept.body.isEmpty
+    {
+      return kept.body
+    }
+    return await renewGeneration(request, credential: credential, cache)
+  }
+
+  @discardableResult
+  private func renewGeneration(_ request: Request, credential: String, _ cache: any CacheStore)
+    async -> String?
+  {
+    guard let customer = request.customer else { return nil }
+    let generation = UUID().uuidString.lowercased()
+    do {
+      try await cache.setEntry(
+        CacheEntry(
+          body: generation, etag: nil, cacheControl: nil, age: nil, receivedAt: hooks.now()),
+        forKey: generationKey(customer, credential: credential),
+        timeToLive: options.staleFor + 86_400)
+    } catch {
+      report(error)
+    }
+    return generation
+  }
+
+  private func generationKey(_ customer: String, credential: String) -> String {
+    let parts = ["entitler-generation-v1", "key", sha256(credential), customer]
+    return sha256("[" + parts.map(jsonString).joined(separator: ",") + "]")
+  }
+
+  func cacheKey(_ request: Request, credential: String, generation: String? = nil) -> String {
     let parts =
       [
         "entitler-cache-v2", request.method, urlString(for: request), "key", sha256(credential),
       ] + request.headers.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] }
+      + (generation.map { ["generation", $0] } ?? [])
     return sha256("[" + parts.map(jsonString).joined(separator: ",") + "]")
   }
 
