@@ -258,9 +258,10 @@ import Testing
     #expect(api.requests.count == 3)
   }
 
-  @Test func aWriteThatMayHaveLandedStillDropsTheKeptAnswers() async throws {
+  @Test(arguments: [Answer(failure: .timedOut), Answer(status: 504), Answer(status: 400)])
+  func aWriteThatMayHaveLandedStillDropsTheKeptAnswers(_ unconfirmed: Answer) async throws {
     let kept = Answer(headers: ["Cache-Control": "private, max-age=600"], body: switchCheck)
-    let api = FakeAPI([kept, Answer(failure: .timedOut), kept])
+    let api = FakeAPI([kept, unconfirmed, kept])
     let ada = try api.server(options: EntitlerOptions(maxRetries: 0)).customer("ada")
     _ = try await ada.check("priority_support")
     await #expect(throws: EntitlerError.self) {
