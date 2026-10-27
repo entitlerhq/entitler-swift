@@ -26,7 +26,8 @@ let package = Package(
         "Entitler",
         "EntitlerTesting",
         .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
-      ]
+      ],
+      resources: [.copy("Fixtures")]
     ),
   ]
 )
