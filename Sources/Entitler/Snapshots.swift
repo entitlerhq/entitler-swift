@@ -319,12 +319,15 @@ private struct ClaimEntitlement: Decodable {
   let banked: Int64?
   let remaining: ClaimValue?
   let resetsAt: Int64?
+  let decimals: Int?
+  let currency: String?
 
   var entitlement: Entitlement {
     let type = FeatureType(rawValue: kind)
     return Entitlement(
       key: key, type: type, entitled: entitled,
-      value: value?.feature(entitled: entitled) ?? .amount(0),
+      value: value?.feature(entitled: entitled) ?? .amount(0), markets: nil,
+      decimals: decimals ?? 0, currency: currency.flatMap { $0.isEmpty ? nil : $0 },
       sources: (sources ?? []).compactMap(\.source), upgrades: [],
       meter: type == .metered
         ? Meter(
@@ -362,17 +365,18 @@ private struct ClaimSource: Decodable {
       return .plan(
         PlanSource(
           planID: plan.id, plan: plan.key, name: plan.name, product: product, version: version,
-          byDefault: byDefault, value: byDefault ? nil : value, through: through))
+          byDefault: byDefault, value: byDefault ? nil : value, markets: nil, through: through))
     case "addon":
       guard let plan, let version, let quantity else { return nil }
       return .addOn(
         AddOnSource(
           planID: plan.id, plan: plan.key, name: plan.name, version: version, quantity: quantity,
-          value: value, through: through))
+          value: value, markets: nil, through: through))
     case "grant":
       guard let grant else { return nil }
       return .grant(
-        GrantSource(grant: grant, until: until.map(date), value: value, through: through))
+        GrantSource(
+          grant: grant, until: until.map(date), value: value, markets: nil, through: through))
     case "group":
       return .group(features: features ?? [])
     default:

@@ -116,8 +116,8 @@ func refusedReason(_ token: String, now: Date = issued) -> Reason? {
         ],
         [
           "key": "api_calls", "kind": "metered", "entitled": true, "value": 1000, "used": 400,
-          "held": 50, "banked": 0, "remaining": 550, "resetsAt": 1_792_000_000, "decimals": 0,
-          "currency": "",
+          "held": 50, "banked": 0, "remaining": 550, "resetsAt": 1_792_000_000, "decimals": 2,
+          "currency": "aud",
           "sources": [
             [
               "type": "addon", "plan": ["id": "pl_9", "key": "boost", "name": "Boost"],
@@ -151,6 +151,8 @@ func refusedReason(_ token: String, now: Date = issued) -> Reason? {
     #expect(support.type == .switch)
     #expect(support.value == .on)
     #expect(support.meter == nil)
+    #expect(support.decimals == 0)
+    #expect(support.currency == nil)
     #expect(support.sources.count == 2)
     guard case .plan(let plan) = support.sources[0], case .grant(let grant) = support.sources[1]
     else { throw SourceMismatch() }
@@ -160,6 +162,9 @@ func refusedReason(_ token: String, now: Date = issued) -> Reason? {
 
     let calls = try #require(entitlements["api_calls"])
     #expect(calls.value == .amount(1000))
+    #expect(calls.decimals == 2)
+    #expect(calls.currency == "aud")
+    #expect(calls.markets == nil)
     #expect(
       calls.meter
         == Meter(

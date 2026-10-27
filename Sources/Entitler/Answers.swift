@@ -81,6 +81,9 @@ public struct PlanSource: Hashable, Sendable {
   public let byDefault: Bool
   /// The plan's share of the value, or `nil` when the answer names none.
   public let value: FeatureValue?
+  /// Its share by market for a money feature, market id to limit, or `nil` when the value isn't
+  /// money.
+  public let markets: [String: Limit]?
   /// The group whose membership passed this value on, or `nil`.
   public let through: String?
 }
@@ -99,6 +102,9 @@ public struct AddOnSource: Hashable, Sendable {
   public let quantity: Int64
   /// The add-on's share of the value, or `nil` when the answer names none.
   public let value: FeatureValue?
+  /// Its share by market for a money feature, market id to limit, or `nil` when the value isn't
+  /// money.
+  public let markets: [String: Limit]?
   /// The group whose membership passed this value on, or `nil`.
   public let through: String?
 }
@@ -111,6 +117,9 @@ public struct GrantSource: Hashable, Sendable {
   public let until: Date?
   /// The grant's share of the value, or `nil` when the answer names none.
   public let value: FeatureValue?
+  /// Its share by market for a money feature, market id to limit, or `nil` when the value isn't
+  /// money.
+  public let markets: [String: Limit]?
   /// The group whose membership passed this value on, or `nil`.
   public let through: String?
 }
@@ -179,8 +188,16 @@ public struct Entitlement: Hashable, Sendable {
   public let type: FeatureType
   /// Entitler's decision: whether the customer may use the feature now.
   public let entitled: Bool
-  /// The customer's value; for an on/off feature or a group, ``FeatureValue/on`` or `0`.
+  /// The customer's value; for an on/off feature or a group, ``FeatureValue/on`` or `0`. A money
+  /// feature's value is `0`; read ``markets``.
   public let value: FeatureValue
+  /// A money feature's value by market, market id to limit, or `nil` when the value isn't money.
+  public let markets: [String: Limit]?
+  /// How many decimal places the feature's amounts carry: every allowance, meter and usage amount
+  /// is a whole number of its smallest unit, so 1.5 GB at `3` is `1500`.
+  public let decimals: Int
+  /// The lower-case currency code of a money feature, such as `aud`, or `nil`.
+  public let currency: String?
   /// Where the value comes from.
   public let sources: [EntitlementSource]
   /// Plans and add-ons that would give the customer the feature.

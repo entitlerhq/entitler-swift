@@ -55,12 +55,26 @@ func body(_ request: URLRequest) -> [String: Any] {
     #expect(sent["mode"] as? String == "USAGE_MODE_OBSERVE")
     #expect(sent["occurredAtMs"] as? Int == 1_789_999_999_500)
     #expect(sent["register"] == nil)
+    #expect(sent["currency"] == nil)
     #expect(result.outcome == .recorded)
     #expect(result.id == "us_1")
     #expect(result.mode == .gate)
     #expect(result.occurredAt == Date(timeIntervalSince1970: 1_789_999_999.5))
     #expect(result.meter?.remaining == .amount(750))
     #expect(result.customer == "ada")
+  }
+
+  @Test func aReportSendsItsCurrencyAndReadsSaturation() async throws {
+    let api = FakeAPI([
+      Answer(
+        body: usage("RECORDED", amount: 3).replacingOccurrences(
+          of: #""saturated": false"#, with: #""saturated": true"#))
+    ])
+    let result = try await api.server().customer("ada").recordUsage(
+      of: aiCredits, amount: 3, idempotencyKey: "run-43", currency: "aud")
+
+    #expect(body(try #require(api.requests.first))["currency"] as? String == "aud")
+    #expect(result.saturated)
   }
 
   @Test func aWriteIsRetriedAndAFailureCarriesItsIdempotencyKey() async throws {
@@ -149,7 +163,7 @@ func body(_ request: URLRequest) -> [String: Any] {
     ])
     let customer = try api.server().customer("ada")
     let summary = try await customer.withHold(
-      of: aiCredits, amount: 500, idempotencyKey: "summary-81", ttlSeconds: 600
+      of: aiCredits, amount: 500, idempotencyKey: "summary-81", currency: "aud", ttlSeconds: 600
     ) { hold in
       #expect(hold.id == "ho_1")
       #expect(!hold.isDuplicate)
@@ -165,6 +179,8 @@ func body(_ request: URLRequest) -> [String: Any] {
         "/v1/customers/ada/usage",
       ])
     #expect(body(requests[0])["ttlSeconds"] as? Int == 600)
+    #expect(body(requests[0])["currency"] as? String == "aud")
+    #expect(body(requests[2])["currency"] as? String == "aud")
     #expect(body(requests[1])["amount"] as? Int == 500)
     #expect(body(requests[2])["amount"] as? Int == 20)
     #expect(body(requests[2])["idempotencyKey"] as? String == "summary-81:excess")

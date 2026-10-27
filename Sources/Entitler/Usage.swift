@@ -97,6 +97,8 @@ public struct UsageResult: Hashable, Sendable {
   public let expiresAt: Date?
   /// True when the idempotency key repeated an earlier request, which answered this.
   public let replayed: Bool
+  /// True when the report would have pushed a meter past 2^53−1, so it was recorded off the meter.
+  public let saturated: Bool
 
   /// Reads a field of ``entitlement``.
   public subscript<Value>(dynamicMember field: KeyPath<Entitlement, Value>) -> Value {
@@ -109,7 +111,7 @@ public struct UsageResult: Hashable, Sendable {
   }
 }
 
-/// An open hold, from ``Customer/startHold(of:amount:idempotencyKey:ttlSeconds:timeout:)``.
+/// An open hold, from ``Customer/startHold(of:amount:idempotencyKey:currency:ttlSeconds:timeout:)``.
 /// Report the amount used with ``use(_:)``, then call ``finish()`` however the work ended, or
 /// ``release()`` for work that never ran.
 ///
@@ -123,7 +125,7 @@ public struct UsageResult: Hashable, Sendable {
 /// Only the first of ``finish()`` and ``release()`` acts; a later call answers the first one's
 /// result. Each runs in a task of its own, so cancelling the caller cannot stop it halfway. A hold
 /// never ended expires after its `ttlSeconds`, recording nothing;
-/// ``Customer/withHold(of:amount:idempotencyKey:ttlSeconds:timeout:_:)`` always ends it.
+/// ``Customer/withHold(of:amount:idempotencyKey:currency:ttlSeconds:timeout:_:)`` always ends it.
 public final class Hold: Sendable {
   /// The hold's id.
   public let id: String
@@ -137,13 +139,14 @@ public final class Hold: Sendable {
   let customer: any Customer
   let feature: String
   let key: String
+  let currency: String?
   let timeout: TimeInterval?
   private let used = LockedValue<Int64?>(nil)
   private let ending = LockedValue<Task<UsageResult, any Error>?>(nil)
 
   init(
     id: String, expiresAt: Date, result: UsageResult, isDuplicate: Bool, customer: any Customer,
-    feature: String, key: String, timeout: TimeInterval?
+    feature: String, key: String, currency: String?, timeout: TimeInterval?
   ) {
     self.id = id
     self.expiresAt = expiresAt
@@ -152,6 +155,7 @@ public final class Hold: Sendable {
     self.customer = customer
     self.feature = feature
     self.key = key
+    self.currency = currency
     self.timeout = timeout
   }
 
@@ -243,8 +247,8 @@ public final class Hold: Sendable {
 
   private func recordExcess(_ amount: Int64) async throws -> UsageResult {
     try await customer.recordUsage(
-      of: feature, amount: amount, idempotencyKey: key + excessSuffix, mode: .observe,
-      timeout: timeout)
+      of: feature, amount: amount, idempotencyKey: key + excessSuffix, currency: currency,
+      mode: .observe, timeout: timeout)
   }
 }
 
@@ -264,31 +268,37 @@ extension Customer {
   ///   - idempotencyKey: A key naming the event in your own system (this message, this export,
   ///     this webhook delivery), 1 to 200 printable ASCII characters. Entitler keeps it, so a retry
   ///     from another process or after a restart never counts twice.
+  ///   - currency: The lower-case currency code of the amount, for a money feature. Entitler
+  ///     refuses one that isn't the feature's.
   ///   - mode: ``UsageMode/gate`` (the default) or ``UsageMode/observe``.
   ///   - occurredAt: When the usage happened, so it counts in that period.
   ///   - register: Registers a customer not registered yet, if the key may register customers.
   ///   - timeout: How long each attempt may take, in seconds, instead of the client's timeout.
   @discardableResult
   public func recordUsage(
-    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, mode: UsageMode? = nil,
-    occurredAt: Date? = nil, register: Bool? = nil, timeout: TimeInterval? = nil
+    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    mode: UsageMode? = nil, occurredAt: Date? = nil, register: Bool? = nil,
+    timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
     try await recordUsage(
-      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, mode: mode,
+      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, currency: currency,
+      mode: mode,
       occurredAt: occurredAt, register: register, timeout: timeout)
   }
 
   /// Records usage of a metered feature named by its key.
   @discardableResult
   public func recordUsage(
-    of feature: String, amount: Int64, idempotencyKey: String, mode: UsageMode? = nil,
-    occurredAt: Date? = nil, register: Bool? = nil, timeout: TimeInterval? = nil
+    of feature: String, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    mode: UsageMode? = nil, occurredAt: Date? = nil, register: Bool? = nil,
+    timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
     let key = try validIdempotencyKey(idempotencyKey)
     let body = UsageBody(
       featureKey: try require(feature, Messages.feature),
       amount: try positive(amount),
       idempotencyKey: key,
+      currency: currency,
       mode: mode.map { "USAGE_MODE_" + $0.rawValue.uppercased() },
       occurredAtMs: try occurredAt.map(epochMilliseconds),
       register: register)
@@ -296,24 +306,24 @@ extension Customer {
   }
 
   /// Holds an amount, answering a refusal instead of throwing; the building block of
-  /// ``startHold(of:amount:idempotencyKey:ttlSeconds:timeout:)``.
+  /// ``startHold(of:amount:idempotencyKey:currency:ttlSeconds:timeout:)``.
   public func holdUsage(
-    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, ttlSeconds: Int? = nil,
-    timeout: TimeInterval? = nil
+    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    ttlSeconds: Int? = nil, timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
     try await holdUsage(
-      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, ttlSeconds: ttlSeconds,
-      timeout: timeout)
+      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, currency: currency,
+      ttlSeconds: ttlSeconds, timeout: timeout)
   }
 
   /// Holds an amount of a metered feature named by its key, answering a refusal instead of
   /// throwing.
   public func holdUsage(
-    of feature: String, amount: Int64, idempotencyKey: String, ttlSeconds: Int? = nil,
-    timeout: TimeInterval? = nil
+    of feature: String, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    ttlSeconds: Int? = nil, timeout: TimeInterval? = nil
   ) async throws -> UsageResult {
     try await createHold(
-      feature, amount, try validIdempotencyKey(idempotencyKey), ttlSeconds, timeout
+      feature, amount, try validIdempotencyKey(idempotencyKey), currency, ttlSeconds, timeout
     ).answer
   }
 
@@ -343,26 +353,28 @@ extension Customer {
   /// Holds an amount while work runs, and opens a ``Hold`` for it.
   ///
   /// - Parameters:
+  ///   - currency: The lower-case currency code of the amount, for a money feature.
   ///   - ttlSeconds: How long the hold lasts, 1 to 3,600 seconds. Defaults to 300.
   /// - Throws: ``EntitlerError/usageRefused(_:)`` when the customer has too little left, and
   ///   ``EntitlerError/usageReplayed(_:)`` when the key's hold is already settled, released or
   ///   expired.
   public func startHold(
-    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, ttlSeconds: Int? = nil,
-    timeout: TimeInterval? = nil
+    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    ttlSeconds: Int? = nil, timeout: TimeInterval? = nil
   ) async throws -> Hold {
     try await startHold(
-      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, ttlSeconds: ttlSeconds,
-      timeout: timeout)
+      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, currency: currency,
+      ttlSeconds: ttlSeconds, timeout: timeout)
   }
 
   /// Holds an amount of a metered feature named by its key, and opens a ``Hold`` for it.
   public func startHold(
-    of feature: String, amount: Int64, idempotencyKey: String, ttlSeconds: Int? = nil,
-    timeout: TimeInterval? = nil
+    of feature: String, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    ttlSeconds: Int? = nil, timeout: TimeInterval? = nil
   ) async throws -> Hold {
     let key = try validIdempotencyKey(idempotencyKey, maxLength: 200 - excessSuffix.count)
-    let (answer, retried) = try await createHold(feature, amount, key, ttlSeconds, timeout)
+    let (answer, retried) = try await createHold(
+      feature, amount, key, currency, ttlSeconds, timeout)
     if answer.outcome == .refused {
       throw EntitlerError.usageRefused(UsageRefusedError(result: answer))
     }
@@ -381,7 +393,7 @@ extension Customer {
     return Hold(
       id: id, expiresAt: expiresAt, result: answer,
       isDuplicate: answer.outcome == .duplicate && !retried, customer: self, feature: feature,
-      key: key, timeout: timeout)
+      key: key, currency: currency, timeout: timeout)
   }
 
   /// Holds an amount, runs `work`, then settles what `work` reported with ``Hold/use(_:)``, or the
@@ -408,22 +420,22 @@ extension Customer {
   ///   little left, `work`'s own error, and ``EntitlerError/usageSettlement(_:)`` carrying what
   ///   `work` returned when settling fails.
   public func withHold<Result: Sendable>(
-    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, ttlSeconds: Int? = nil,
-    timeout: TimeInterval? = nil, _ work: (Hold) async throws -> Result
+    of feature: Feature<Metered>, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    ttlSeconds: Int? = nil, timeout: TimeInterval? = nil, _ work: (Hold) async throws -> Result
   ) async throws -> Result {
     try await withHold(
-      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, ttlSeconds: ttlSeconds,
-      timeout: timeout, work)
+      of: feature.key, amount: amount, idempotencyKey: idempotencyKey, currency: currency,
+      ttlSeconds: ttlSeconds, timeout: timeout, work)
   }
 
   /// Holds an amount of a metered feature named by its key, runs `work`, then settles it.
   public func withHold<Result: Sendable>(
-    of feature: String, amount: Int64, idempotencyKey: String, ttlSeconds: Int? = nil,
-    timeout: TimeInterval? = nil, _ work: (Hold) async throws -> Result
+    of feature: String, amount: Int64, idempotencyKey: String, currency: String? = nil,
+    ttlSeconds: Int? = nil, timeout: TimeInterval? = nil, _ work: (Hold) async throws -> Result
   ) async throws -> Result {
     let hold = try await startHold(
-      of: feature, amount: amount, idempotencyKey: idempotencyKey, ttlSeconds: ttlSeconds,
-      timeout: timeout)
+      of: feature, amount: amount, idempotencyKey: idempotencyKey, currency: currency,
+      ttlSeconds: ttlSeconds, timeout: timeout)
     if hold.isDuplicate {
       try Task.checkCancellation()
       return try await work(hold)
@@ -446,7 +458,7 @@ extension Customer {
   }
 
   private func createHold(
-    _ feature: String, _ amount: Int64, _ key: String, _ ttlSeconds: Int?,
+    _ feature: String, _ amount: Int64, _ key: String, _ currency: String?, _ ttlSeconds: Int?,
     _ timeout: TimeInterval?
   ) async throws -> (answer: UsageResult, retried: Bool) {
     if let ttlSeconds, !(1...3600).contains(ttlSeconds) {
@@ -454,7 +466,7 @@ extension Customer {
     }
     let body = UsageBody(
       featureKey: try require(feature, Messages.feature), amount: try positive(amount),
-      idempotencyKey: key, ttlSeconds: ttlSeconds)
+      idempotencyKey: key, currency: currency, ttlSeconds: ttlSeconds)
     return try await write(Wire.usageCreateHold, [:], body, key, timeout)
   }
 
@@ -475,6 +487,7 @@ private struct UsageBody: Encodable {
   var featureKey: String
   var amount: Int64
   var idempotencyKey: String
+  var currency: String? = nil
   var mode: String? = nil
   var occurredAtMs: Int64? = nil
   var register: Bool? = nil
