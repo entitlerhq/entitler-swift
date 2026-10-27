@@ -515,3 +515,61 @@ func decodeCustomerPricing(_ body: Data) throws -> CustomerPricing {
         subscriptions: $0.subscriptions.map(subscriptionPrice))
     })
 }
+
+/// A feature in the catalogue, as the served version describes it.
+public struct CatalogueFeature: Hashable, Sendable {
+  /// The feature's id.
+  public let id: String
+  /// The feature's key.
+  public let key: String
+  /// The feature's type.
+  public let type: FeatureType
+  /// True when the feature is archived.
+  public let archived: Bool
+  /// Its name, or `nil` when the catalogue serves no version of it.
+  public let name: String?
+  /// Its description, or `nil`.
+  public let description: String?
+  /// The unit a metered feature counts, such as `credits`, or `nil`.
+  public let unit: String?
+  /// How many decimal places its amounts carry; `0` for whole units.
+  public let decimals: Int
+  /// True when it counts money, in each customer's currency.
+  public let money: Bool
+  /// The served version's number, or `nil`.
+  public let version: Int64?
+}
+
+/// The catalogue's features, and what served them.
+public struct FeatureList: Hashable, Sendable, StaleMarking {
+  /// The features, archived ones included.
+  public let features: [CatalogueFeature]
+  /// The track and release that served them.
+  public let served: Served
+  /// True only when the SDK answered from a kept copy because Entitler was unreachable.
+  public internal(set) var stale = false
+}
+
+func features(_ core: Core, revalidate: Bool, timeout: TimeInterval?) async throws
+  -> FeatureList
+{
+  var request = try Wire.pricingListFeaturesOnSale.request([:])
+  request.revalidate = revalidate
+  request.timeout = timeout
+  return try await core.cachedCall(request, decode: decodeFeatures)
+}
+
+func decodeFeatures(_ body: Data) throws -> FeatureList {
+  let answer = try wire(Wire.ListFeaturesOnSaleResponse.self, body)
+  return FeatureList(
+    features: answer.features.map { feature in
+      let version = feature.version
+      return CatalogueFeature(
+        id: feature.id, key: feature.key,
+        type: FeatureType(rawValue: shortName(feature.kind, prefix: "FEATURE_KIND_")),
+        archived: feature.archived, name: version?.name, description: version?.description,
+        unit: version.flatMap { $0.unit.isEmpty ? nil : $0.unit },
+        decimals: Int(version?.measure?.decimals ?? 0), money: version?.measure?.money != nil,
+        version: version?.number)
+    }, served: try at("served") { try served(answer.served) })
+}

@@ -55,6 +55,14 @@ public final class EntitlerVisitor: Sendable, CustomStringConvertible, CustomRef
       timeout: timeout)
   }
 
+  /// Reads the catalogue's features on the default track, archived ones included, as the served
+  /// version describes them.
+  public func features(revalidate: Bool = false, timeout: TimeInterval? = nil) async throws
+    -> FeatureList
+  {
+    try await Entitler.features(core, revalidate: revalidate, timeout: timeout)
+  }
+
   /// The public keys that verify snapshots. Sent with no credential.
   public func snapshotKeys(timeout: TimeInterval? = nil) async throws -> SnapshotKeySet {
     try await Entitler.snapshotKeys(core, timeout: timeout)

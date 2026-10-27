@@ -16,6 +16,7 @@ let operations = [
   "Grants.RevokeGrant",
   "Pricing.GetCustomerPricing",
   "Pricing.GetPricing",
+  "Pricing.ListFeaturesOnSale",
   "SnapshotKeys",
   "Snapshots.CreateSnapshot",
   "Subscriptions.CancelPendingAddOnChange",

@@ -62,6 +62,7 @@ enum Wire {
     var `observedAt`: Int64
     var `productId`: String?
   }
+  struct BillingPeriodReset: Decodable, Sendable {}
   struct CancelPendingAddOnChangeResponse: Decodable, Sendable {
     var `confirming`: PaymentConfirming?
     var `done`: MoveResult?
@@ -193,6 +194,14 @@ enum Wire {
     var `throughFeatureKey`: String?
     var `versionNumber`: Int64
   }
+  typealias DeviceAtLimit = String
+  struct DeviceLimit: Decodable, Sendable {
+    var `atLimit`: DeviceAtLimit
+    var `kind`: DeviceLimitKind
+    var `lockoutMinutes`: [Int64]
+    var `lockoutQuietDays`: Int64?
+  }
+  typealias DeviceLimitKind = String
   typealias DiscountGivenBy = String
   typealias Effective = String
   struct EntitledCustomer: Decodable, Sendable {
@@ -225,18 +234,41 @@ enum Wire {
     var `firstAfterMonths`: Int64
     var `months`: Int64
   }
+  struct Feature: Decodable, Sendable {
+    var `archived`: Bool
+    var `id`: String
+    var `key`: String
+    var `kind`: FeatureKind
+    var `version`: FeatureVersion?
+  }
   struct FeatureImpact: Decodable, Sendable {
     var `featureKey`: String
     var `from`: FeatureValue?
     var `kind`: ImpactKind
     var `to`: FeatureValue?
   }
+  typealias FeatureKind = String
   struct FeatureValue: Decodable, Sendable {
     var `configuration`: Limit?
     var `group`: GroupValue?
     var `metered`: Limit?
     var `money`: MarketLimits?
     var `switch`: Bool?
+  }
+  struct FeatureVersion: Decodable, Sendable {
+    var `changeId`: String?
+    var `description`: String
+    var `deviceLimit`: DeviceLimit?
+    var `lateDays`: Int64?
+    var `measure`: Measure?
+    var `members`: GroupValue?
+    var `name`: String
+    var `number`: Int64
+    var `reset`: MeterReset?
+    var `rounding`: Rounding?
+    var `sharesLimit`: Bool
+    var `unit`: String
+    var `zones`: [Zone]
   }
   typealias FeeDirection = String
   struct FeeSchedule: Decodable, Sendable {
@@ -394,6 +426,10 @@ enum Wire {
     var `nextChangeAt`: Int64?
     var `served`: ServedCatalogue?
   }
+  struct ListFeaturesOnSaleResponse: Decodable, Sendable {
+    var `features`: [Feature]
+    var `served`: ServedCatalogue?
+  }
   struct ListingIds: Decodable, Sendable {
     var `apple`: AppleListingIds?
     var `google`: GoogleListingIds?
@@ -416,6 +452,10 @@ enum Wire {
     var `limits`: [MarketLimit]
   }
   typealias MarketTax = String
+  struct Measure: Decodable, Sendable {
+    var `decimals`: Int64?
+    var `money`: Money?
+  }
   struct Meter: Decodable, Sendable {
     var `banked`: Int64
     var `held`: Int64
@@ -423,6 +463,16 @@ enum Wire {
     var `resetsAt`: Int64?
     var `used`: Int64
   }
+  struct MeterReset: Decodable, Sendable {
+    var `billingPeriod`: BillingPeriodReset?
+    var `window`: MeterWindow?
+  }
+  struct MeterWindow: Decodable, Sendable {
+    var `anchor`: WindowAnchor
+    var `count`: Int64
+    var `unit`: WindowUnit
+  }
+  struct Money: Decodable, Sendable {}
   struct MoveResult: Decodable, Sendable {
     var `change`: PlanChange?
     var `customerId`: String
@@ -609,6 +659,7 @@ enum Wire {
     var `grant`: Grant?
     var `revision`: Int64
   }
+  typealias Rounding = String
   struct ScheduledChange: Decodable, Sendable {
     var `acceptanceRequired`: Bool
     var `accepted`: Bool
@@ -712,12 +763,18 @@ enum Wire {
     var `saturated`: Bool
     var `usageId`: String?
   }
+  typealias WindowAnchor = String
+  typealias WindowUnit = String
   struct YearlyDate: Decodable, Sendable {
     var `day`: Int64
     var `month`: Int64
   }
   struct YearlyOn: Decodable, Sendable {
     var `dates`: [YearlyDate]
+  }
+  struct Zone: Decodable, Sendable {
+    var `key`: String
+    var `name`: String
   }
 
   static let billingCreatePortalSession = Route(
@@ -756,6 +813,9 @@ enum Wire {
   static let pricingGetPricing = Route(
     method: "GET", path: "/v1/pricing",
     query: ["target.team_id", "target.project_id", "target.environment_id", "market", "country"])
+  static let pricingListFeaturesOnSale = Route(
+    method: "GET", path: "/v1/pricing/features",
+    query: ["target.team_id", "target.project_id", "target.environment_id"])
   static let snapshotKeys = Route(method: "GET", path: "/v1/snapshot-keys", query: [])
   static let snapshotsCreateSnapshot = Route(
     method: "POST", path: "/v1/customers/{external_id}/snapshots", query: [])
