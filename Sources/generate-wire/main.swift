@@ -1,11 +1,25 @@
 import Foundation
 
 let operations = [
-  "CustomerTokens.CreateToken", "Customers.EraseCustomer", "Customers.GetCustomer",
-  "Customers.RegisterCustomer", "Customers.UpdateCustomer", "Entitlements.CheckFeature",
-  "Entitlements.ListEntitlements", "Pricing.GetCustomerPricing", "Pricing.GetPricing",
-  "SnapshotKeys", "Snapshots.CreateSnapshot", "Usage.CreateHold",
-  "Usage.ReleaseHold", "Usage.ReportUsage",
+  "CustomerTokens.CreateToken",
+  "CustomerTracks.AssignTrack",
+  "Customers.EraseCustomer",
+  "Customers.GetCustomer",
+  "Customers.RegisterCustomer",
+  "Customers.UpdateCustomer",
+  "Entitlements.CheckFeature",
+  "Entitlements.ListEntitlements",
+  "Grants.CreateGrant",
+  "Grants.RevokeGrant",
+  "Pricing.GetCustomerPricing",
+  "Pricing.GetPricing",
+  "SnapshotKeys",
+  "Snapshots.CreateSnapshot",
+  "Usage.AdjustMeter",
+  "Usage.CancelReport",
+  "Usage.CreateHold",
+  "Usage.ReleaseHold",
+  "Usage.ReportUsage",
   "Usage.SettleHold",
 ]
 let schemaPrefix = "#/components/schemas/"

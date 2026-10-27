@@ -1,6 +1,11 @@
 // Generated from openapi.json by `swift run generate-wire`. Do not edit.
 
 enum Wire {
+  struct Actor: Decodable, Sendable {
+    var `id`: String
+    var `type`: ActorType
+  }
+  typealias ActorType = String
   struct AddOnSource: Decodable, Sendable {
     var `planId`: String
     var `planKey`: String
@@ -9,6 +14,10 @@ enum Wire {
     var `throughFeatureKey`: String?
     var `value`: FeatureValue?
     var `versionNumber`: Int64
+  }
+  struct AdjustMeterResponse: Decodable, Sendable {
+    var `saturated`: Bool
+    var `tracked`: TrackedUsage?
   }
   struct Amount: Decodable, Sendable {
     var `amount`: Int64
@@ -19,6 +28,15 @@ enum Wire {
     var `productId`: String
     var `subscriptionGroupId`: String?
   }
+  struct AssignTrackResponse: Decodable, Sendable {
+    var `assignment`: CustomerTrack?
+    var `changed`: Bool
+    var `endedTestHoldings`: Int64
+  }
+  typealias AssignmentSource = String
+  struct CancelReportResponse: Decodable, Sendable {
+    var `tracked`: TrackedUsage?
+  }
   struct CheckFeatureResponse: Decodable, Sendable {
     var `asOf`: Int64
     var `customer`: EntitledCustomer?
@@ -27,6 +45,10 @@ enum Wire {
     var `served`: ServedCatalogue?
   }
   typealias ConnectionMode = String
+  struct CreateGrantResponse: Decodable, Sendable {
+    var `grant`: Grant?
+    var `revision`: Int64
+  }
   struct CreateHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
@@ -88,6 +110,15 @@ enum Wire {
     var `subscriptions`: [SubscriptionPrice]
   }
   typealias CustomerTokenScope = String
+  struct CustomerTrack: Decodable, Sendable {
+    var `customerId`: String
+    var `externalId`: String
+    var `money`: CustomerMoney
+    var `previousTrackId`: String?
+    var `revision`: Int64
+    var `source`: AssignmentSource
+    var `trackId`: String?
+  }
   struct DefaultPlanSource: Decodable, Sendable {
     var `planId`: String
     var `planKey`: String
@@ -155,11 +186,27 @@ enum Wire {
     var `productId`: String
     var `purchaseOptionId`: String?
   }
+  struct Grant: Decodable, Sendable {
+    var `featureKey`: String
+    var `from`: Int64
+    var `grantedBy`: Actor?
+    var `id`: String
+    var `reason`: String
+    var `revokeReason`: String?
+    var `revokedAt`: Int64?
+    var `revokedBy`: Actor?
+    var `until`: Int64?
+    var `value`: GrantValue?
+  }
   struct GrantSource: Decodable, Sendable {
     var `grantId`: String
     var `throughFeatureKey`: String?
     var `until`: Int64?
     var `value`: FeatureValue?
+  }
+  struct GrantValue: Decodable, Sendable {
+    var `limit`: Limit?
+    var `on`: SwitchOn?
   }
   struct GroupMember: Decodable, Sendable {
     var `configuration`: Limit?
@@ -335,6 +382,11 @@ enum Wire {
   struct ReportUsageResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
+  struct RevokeGrantResponse: Decodable, Sendable {
+    var `changed`: Bool
+    var `grant`: Grant?
+    var `revision`: Int64
+  }
   struct ServedCatalogue: Decodable, Sendable {
     var `changeId`: String?
     var `nothing`: NothingServed?
@@ -366,6 +418,7 @@ enum Wire {
     var `renewsAt`: Int64
     var `subscriptionId`: String
   }
+  struct SwitchOn: Decodable, Sendable {}
   struct TrackedUsage: Decodable, Sendable {
     var `asOf`: Int64
     var `customer`: EntitledCustomer?
@@ -421,6 +474,8 @@ enum Wire {
 
   static let customerTokensCreateToken = Route(
     method: "POST", path: "/v1/customers/{external_id}/tokens", query: [])
+  static let customerTracksAssignTrack = Route(
+    method: "PUT", path: "/v1/customers/{external_id}/track", query: [])
   static let customersEraseCustomer = Route(
     method: "POST", path: "/v1/customers/{external_id}:erase", query: [])
   static let customersGetCustomer = Route(
@@ -436,6 +491,10 @@ enum Wire {
   static let entitlementsListEntitlements = Route(
     method: "GET", path: "/v1/customers/{external_id}/entitlements",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
+  static let grantsCreateGrant = Route(
+    method: "POST", path: "/v1/customers/{external_id}/grants", query: [])
+  static let grantsRevokeGrant = Route(
+    method: "POST", path: "/v1/customers/{external_id}/grants/{grant_id}:revoke", query: [])
   static let pricingGetCustomerPricing = Route(
     method: "GET", path: "/v1/customers/{external_id}/pricing",
     query: ["target.team_id", "target.project_id", "target.environment_id"])
@@ -445,6 +504,10 @@ enum Wire {
   static let snapshotKeys = Route(method: "GET", path: "/v1/snapshot-keys", query: [])
   static let snapshotsCreateSnapshot = Route(
     method: "POST", path: "/v1/customers/{external_id}/snapshots", query: [])
+  static let usageAdjustMeter = Route(
+    method: "POST", path: "/v1/customers/{external_id}/meters/{feature_key}:adjust", query: [])
+  static let usageCancelReport = Route(
+    method: "POST", path: "/v1/customers/{external_id}/usage/{usage_id}:cancel", query: [])
   static let usageCreateHold = Route(
     method: "POST", path: "/v1/customers/{external_id}/usage/holds", query: [])
   static let usageReleaseHold = Route(
