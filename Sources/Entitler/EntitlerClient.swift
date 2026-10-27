@@ -214,25 +214,19 @@ actor TokenSource {
     return Task {
       let answer: String?
       do {
-        answer = try await withThrowingTaskGroup(of: String?.self) { group in
-          group.addTask { try await provider() }
-          group.addTask {
-            try await hooks.deadline(timeout)
-            return nil
-          }
-          defer { group.cancelAll() }
-          return try await group.next() ?? nil
-        }
+        answer = try await firstOf(provider, orNilAfter: timeout, hooks: hooks)
+      } catch is CancellationError {
+        throw CancellationError()
       } catch {
-        if Task.isCancelled { throw CancellationError() }
         throw EntitlerError.token(
-          TokenError(message: Messages.tokenFailed, underlyingError: error))
+          TokenError(
+            message: Messages.tokenFailed, underlyingError: error, providerUnreachable: true))
       }
       guard let answer else {
         throw EntitlerError.token(
           TokenError(
             message: "The token provider did not answer within \(timeout.formatted()) seconds.",
-            underlyingError: nil))
+            underlyingError: nil, providerUnreachable: true))
       }
       let token = answer.trimmed
       guard !token.isEmpty, token.isHeaderSafe else {
@@ -240,5 +234,36 @@ actor TokenSource {
       }
       return token
     }
+  }
+}
+
+func firstOf(
+  _ provider: @escaping TokenProvider, orNilAfter timeout: TimeInterval, hooks: Hooks
+) async throws -> String? {
+  typealias Waiting = CheckedContinuation<String?, any Error>
+  let waiting = LockedValue<Waiting?>(nil)
+  let cancelled = LockedValue(false)
+  let work = Task { try await provider() }
+  let timer = Task { try? await hooks.deadline(timeout) }
+  return try await withTaskCancellationHandler {
+    try await withCheckedThrowingContinuation { (continuation: Waiting) in
+      waiting.update { $0 = continuation }
+      Task {
+        let result = await work.result
+        waiting.update { $0.take() }?.resume(with: result.map { Optional($0) })
+        timer.cancel()
+      }
+      Task {
+        await timer.value
+        let outcome: Result<String?, any Error> =
+          cancelled.read() ? .failure(CancellationError()) : .success(nil)
+        waiting.update { $0.take() }?.resume(with: outcome)
+        work.cancel()
+      }
+    }
+  } onCancel: {
+    cancelled.update { $0 = true }
+    timer.cancel()
+    work.cancel()
   }
 }

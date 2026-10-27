@@ -146,7 +146,7 @@ extension URLSession {
 }
 
 extension Optional {
-  fileprivate mutating func take() -> Wrapped? {
+  mutating func take() -> Wrapped? {
     defer { self = nil }
     return self
   }
