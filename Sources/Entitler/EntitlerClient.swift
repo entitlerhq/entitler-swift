@@ -144,6 +144,11 @@ public final class EntitlerClient: Sendable, CustomStringConvertible, CustomRefl
     return try await core.call(request, decode: decodeRegistered).answer
   }
 
+  /// The public keys that verify snapshots. Sent with no credential.
+  public func snapshotKeys(timeout: TimeInterval? = nil) async throws -> SnapshotKeySet {
+    try await Entitler.snapshotKeys(core, timeout: timeout)
+  }
+
   /// Closes the client at sign-out: cancels every call in flight and the pending token request,
   /// drops the in-memory cache, and makes every later call throw ``ClientClosedError``. Closing
   /// twice is safe.

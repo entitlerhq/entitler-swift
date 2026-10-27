@@ -3,7 +3,8 @@ import Foundation
 let operations = [
   "CustomerTokens.CreateToken", "Customers.EraseCustomer", "Customers.GetCustomer",
   "Customers.RegisterCustomer", "Customers.UpdateCustomer", "Entitlements.CheckFeature",
-  "Entitlements.ListEntitlements", "Usage.CreateHold", "Usage.ReleaseHold", "Usage.ReportUsage",
+  "Entitlements.ListEntitlements", "SnapshotKeys", "Snapshots.CreateSnapshot", "Usage.CreateHold",
+  "Usage.ReleaseHold", "Usage.ReportUsage",
   "Usage.SettleHold",
 ]
 let schemaPrefix = "#/components/schemas/"

@@ -52,6 +52,11 @@ public final class EntitlerServer: Sendable, CustomStringConvertible, CustomRefl
     return ServerCustomer(id: given, handle: CustomerHandle(core: core))
   }
 
+  /// The public keys that verify snapshots. Sent with no credential.
+  public func snapshotKeys(timeout: TimeInterval? = nil) async throws -> SnapshotKeySet {
+    try await Entitler.snapshotKeys(core, timeout: timeout)
+  }
+
   /// Closes the client: cancels every call in flight, drops the in-memory cache (a custom store is
   /// left as it is), and makes every later call throw ``ClientClosedError``. Closing twice is safe.
   public func close() { core.close() }

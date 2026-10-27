@@ -93,4 +93,6 @@ enum Messages {
   static let amountUsed = "Pass the amount used as a whole number of 0 or more."
   static let ttlSeconds = "Pass ttlSeconds as a whole number from 1 to 3600."
   static let occurredAt = "Pass occurredAt as a valid date."
+  static let snapshotLifetime = "Pass ttlSeconds as a whole number from 60 to 2592000."
+  static let clockSkew = "Pass clockSkewSeconds as a whole number from 0 to 300."
 }

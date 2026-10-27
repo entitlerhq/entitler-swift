@@ -20,6 +20,13 @@ let package = Package(
     ),
     .target(name: "EntitlerTesting", dependencies: ["Entitler"]),
     .executableTarget(name: "generate-wire"),
-    .testTarget(name: "EntitlerTests", dependencies: ["Entitler", "EntitlerTesting"]),
+    .testTarget(
+      name: "EntitlerTests",
+      dependencies: [
+        "Entitler",
+        "EntitlerTesting",
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+      ]
+    ),
   ]
 )

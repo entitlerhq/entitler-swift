@@ -20,6 +20,11 @@ enum Wire {
   struct CreateHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
+  struct CreateSnapshotResponse: Decodable, Sendable {
+    var `expiresAt`: Int64
+    var `keyId`: String
+    var `token`: String
+  }
   struct CreateTokenResponse: Decodable, Sendable {
     var `customerId`: String?
     var `expiresAt`: Int64
@@ -174,6 +179,9 @@ enum Wire {
   struct SettleHoldResponse: Decodable, Sendable {
     var `tracked`: TrackedUsage?
   }
+  struct SnapshotKeySet: Decodable, Sendable {
+    var `keys`: [[String: String]]
+  }
   struct TrackedUsage: Decodable, Sendable {
     var `asOf`: Int64
     var `customer`: EntitledCustomer?
@@ -233,6 +241,9 @@ enum Wire {
   static let entitlementsListEntitlements = Route(
     method: "GET", path: "/v1/customers/{external_id}/entitlements",
     query: ["target.team_id", "target.project_id", "target.environment_id", "as_of"])
+  static let snapshotKeys = Route(method: "GET", path: "/v1/snapshot-keys", query: [])
+  static let snapshotsCreateSnapshot = Route(
+    method: "POST", path: "/v1/customers/{customer.external_id}/snapshots", query: [])
   static let usageCreateHold = Route(
     method: "POST", path: "/v1/customers/{external_id}/usage/holds", query: [])
   static let usageReleaseHold = Route(

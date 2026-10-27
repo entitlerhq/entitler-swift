@@ -40,6 +40,7 @@ struct Request: Sendable {
   var body: Data? = nil
   var idempotencyKey: String? = nil
   var retryable: Bool? = nil
+  var open = false
 
   var isRetryable: Bool { retryable ?? ["GET", "PUT", "DELETE"].contains(method) }
 }
@@ -250,7 +251,7 @@ final class Core: Sendable, CustomReflectable {
     _ = try request.timeout.map(validTimeout)
     guard let cache else {
       return try await guarded { [self] in
-        try decoded(await send(request, auth: authorise()), decode)
+        try decoded(await send(request, auth: authorise(request)), decode)
       }
     }
     return try await guarded { [self] in
@@ -263,7 +264,7 @@ final class Core: Sendable, CustomReflectable {
   ) async throws -> (answer: Answer, retried: Bool) {
     _ = try request.timeout.map(validTimeout)
     return try await guarded { [self] in
-      let response = try await send(request, auth: authorise())
+      let response = try await send(request, auth: authorise(request))
       return (
         try decoded(response, decode, idempotencyKey: request.idempotencyKey), response.retried
       )
@@ -285,6 +286,11 @@ final class Core: Sendable, CustomReflectable {
     }
   }
 
+  private func authorise(_ request: Request) async throws -> Authorised {
+    guard !request.open else { return Authorised(headers: [:], credential: "", token: "") }
+    return try await authorise()
+  }
+
   private func authorise() async throws -> Authorised {
     let auth = try await credentials.authorise()
     lastAuthorised.update { $0 = auth }
@@ -296,7 +302,7 @@ final class Core: Sendable, CustomReflectable {
   ) async throws -> Answer {
     let auth: Authorised
     do {
-      auth = try await authorise()
+      auth = try await authorise(request)
     } catch let error as EntitlerError where error.isUnreachable {
       guard let last = lastAuthorised.read(),
         let kept = await entry(cacheKey(request, credential: last.credential), in: cache),
@@ -439,7 +445,7 @@ final class Core: Sendable, CustomReflectable {
         }
         let error = apiError(
           http, body: body, now: hooks.now(), idempotencyKey: request.idempotencyKey)
-        if http.statusCode == 401, let refuse = credentials.refuse {
+        if http.statusCode == 401, !request.open, let refuse = credentials.refuse {
           await refuse(current)
           guard !refreshed else { throw EntitlerError.api(error) }
           refreshed = true
