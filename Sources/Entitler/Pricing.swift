@@ -367,7 +367,8 @@ func languageTag(_ locale: Locale) throws -> String {
     language.allSatisfy({ $0.isASCII && $0.isLetter }),
     subtags.dropFirst().allSatisfy({
       (1...8).contains($0.count) && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
-    })
+    }),
+    subtags.count == 1 || subtags.last?.count != 1
   else { throw ArgumentError(message: Messages.locale) }
   return tag
 }
