@@ -22,6 +22,12 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
   case connection(ConnectionError)
   /// An attempt took longer than its timeout.
   case timeout(TimeoutError)
+  /// A hold was refused: the customer is not entitled, or has too little left.
+  case usageRefused(UsageRefusedError)
+  /// A hold's idempotency key repeated a hold that is already settled, released or expired.
+  case usageReplayed(UsageReplayedError)
+  /// Settling a hold, or recording what was used beyond it, failed after its retries.
+  case usageSettlement(UsageSettlementError)
 
   /// The message of the error this case carries.
   public var errorDescription: String? { description }
@@ -32,6 +38,9 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .api(let error): error.description
     case .connection(let error): error.message
     case .timeout(let error): error.message
+    case .usageRefused(let error): error.message
+    case .usageReplayed(let error): error.message
+    case .usageSettlement(let error): error.message
     }
   }
 
@@ -42,6 +51,7 @@ public enum EntitlerError: Error, Sendable, LocalizedError, CustomStringConverti
     case .connection, .timeout: true
     case .api(let error):
       [408, 429].contains(error.status) || error.status >= 500 || error.reason == .responseInvalid
+    case .usageRefused, .usageReplayed, .usageSettlement: false
     }
   }
 
@@ -111,6 +121,8 @@ public struct Reason: RawRepresentable, Hashable, Sendable, CustomStringConverti
   public static let apiAllowanceReached = Reason(rawValue: "API_ALLOWANCE_REACHED")
   /// `asOf` was passed in an environment that does not allow the test clock.
   public static let asOfNotAllowed = Reason(rawValue: "AS_OF_NOT_ALLOWED")
+  /// The hold expired before it was settled.
+  public static let holdExpired = Reason(rawValue: "HOLD_EXPIRED")
   /// The SDK's own: a 2xx answer it cannot read.
   public static let responseInvalid = Reason(rawValue: "RESPONSE_INVALID")
 }
@@ -143,6 +155,81 @@ public struct TimeoutError: Error, Sendable, LocalizedError, CustomStringConvert
 
   /// The message.
   public var message: String { "Entitler did not answer within \(timeout.formatted()) seconds." }
+
+  /// The message.
+  public var errorDescription: String? { message }
+
+  /// The message.
+  public var description: String { message }
+}
+
+/// A refused hold, from ``Customer/startHold(of:amount:idempotencyKey:ttlSeconds:timeout:)`` or
+/// ``Customer/withHold(of:amount:idempotencyKey:ttlSeconds:timeout:_:)``.
+public struct UsageRefusedError: Error, Sendable, LocalizedError, CustomStringConvertible {
+  /// The refused answer, with its ``UsageResult/refusal``, the meter and the upgrades.
+  public let result: UsageResult
+
+  /// The message.
+  public var message: String {
+    result.refusal == .notEntitled
+      ? "The customer is not entitled to \(result.key)."
+      : "The customer has too little \(result.key) left for \(result.amount)."
+  }
+
+  /// The message.
+  public var errorDescription: String? { message }
+
+  /// The message.
+  public var description: String { message }
+}
+
+/// A hold whose idempotency key repeated a hold that is already settled, released or expired.
+public struct UsageReplayedError: Error, Sendable, LocalizedError, CustomStringConvertible {
+  /// The repeated hold's answer.
+  public let result: UsageResult
+
+  /// The message.
+  public let message =
+    "This idempotency key's hold was already settled, released or expired. Use a new key for new work."
+
+  /// The message.
+  public var errorDescription: String? { message }
+
+  /// The message.
+  public var description: String { message }
+}
+
+/// Settling a hold, or recording what was used beyond it, failed after its retries. Keep the
+/// work's output, and finish what the error names.
+public struct UsageSettlementError: Error, Sendable, LocalizedError, CustomStringConvertible {
+  /// The hold's id.
+  public let holdID: String
+  /// True when the hold is closed, settled or expired, and only ``excess`` is left to record.
+  public let settled: Bool
+  /// The amount to settle the hold with, while ``settled`` is false.
+  public let amount: Int64
+  /// What was used beyond the hold and is still to record in observe mode, or `nil`.
+  public let excess: Int64?
+  /// The idempotency key to record ``excess`` under: the hold's key plus `:excess`.
+  public let excessKey: String
+  /// The failure underneath.
+  public let underlyingError: any Error
+  /// What `withHold`'s work returned, so its output is not lost; `nil` from ``Hold/finish()``.
+  public internal(set) var result: (any Sendable)? = nil
+
+  /// What failed, and what to do about it.
+  public var message: String {
+    if !settled {
+      return
+        "Entitler could not settle hold \(holdID). Settle it again with settleUsage(hold:amount:) before it expires."
+    }
+    if let excess {
+      return
+        "Hold \(holdID) is closed, but Entitler could not record the \(excess) used beyond it. Record it in observe mode under the key \(excessKey)."
+    }
+    return
+      "Hold \(holdID) expired with nothing used, and Entitler could not confirm its release. Nothing is owed."
+  }
 
   /// The message.
   public var errorDescription: String? { message }
