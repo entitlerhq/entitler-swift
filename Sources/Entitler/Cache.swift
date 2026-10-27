@@ -7,7 +7,7 @@ import Foundation
 /// skipped; each goes to ``EntitlerOptions/onError`` and neither fails the call.
 ///
 /// A write for a customer, such as recording usage, drops that customer's kept answers in every
-/// client sharing the store once it succeeds or may have landed unanswered: the store keeps a marker
+/// client sharing the store once it is sent, whatever its answer: the store keeps a marker
 /// per customer that their answers' keys include, and the write replaces it.
 public protocol CacheStore: Sendable {
   /// The entry kept under a key, or `nil`.

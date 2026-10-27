@@ -428,7 +428,7 @@ final class Core: Sendable, CustomReflectable {
 
   private func mayHaveChanged(_ request: Request, credential: String) async {
     guard request.method != "GET", let cache else { return }
-    await renewGeneration(request, credential: credential, cache)
+    _ = await Task { await renewGeneration(request, credential: credential, cache) }.value
   }
 
   @discardableResult
@@ -488,16 +488,20 @@ final class Core: Sendable, CustomReflectable {
       }
       let failure: EntitlerError
       do {
-        let (body, http) = try await attempt(
-          urlRequest, timeout: timeout, idempotencyKey: request.idempotencyKey)
+        let (body, http): (Data, HTTPURLResponse)
+        do {
+          (body, http) = try await attempt(
+            urlRequest, timeout: timeout, idempotencyKey: request.idempotencyKey)
+        } catch {
+          await mayHaveChanged(request, credential: current.credential)
+          throw error
+        }
+        await mayHaveChanged(request, credential: current.credential)
         var response = Response(http, body: body)
         if (200..<300).contains(http.statusCode) || (http.statusCode == 304 && etag != nil) {
           await state.reachable()
           response.retried = retries > 0
           if refreshed { response.refreshed = current }
-          if http.statusCode != 304 {
-            await mayHaveChanged(request, credential: current.credential)
-          }
           return response
         }
         let error = apiError(
@@ -523,7 +527,6 @@ final class Core: Sendable, CustomReflectable {
       } catch let error as EntitlerError {
         switch error {
         case .connection, .timeout:
-          await mayHaveChanged(request, credential: current.credential)
           guard request.isRetryable else { throw error }
           failure = error
         default: throw error
