@@ -104,6 +104,22 @@ import Testing
     #expect(try await fake.customer.settleUsage(hold: id, amount: 1).outcome == .settled)
     #expect(fake.used("ai_credits") == 1)
   }
+
+  @Test func aClosedHoldReplaysAsClosedAndHoldIDsStayUnique() async throws {
+    let clock = Clock()
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 10)], id: "user_1") { clock.now }
+    let first = try await fake.customer.holdUsage(
+      of: aiCredits, amount: 1, idempotencyKey: "h-1", ttlSeconds: 60)
+    clock.now += 60
+    let second = try await fake.customer.holdUsage(
+      of: aiCredits, amount: 1, idempotencyKey: "h-2", ttlSeconds: 60)
+
+    #expect(first.holdID != second.holdID)
+    do {
+      _ = try await fake.customer.startHold(of: aiCredits, amount: 1, idempotencyKey: "h-1")
+      Issue.record("Expected a replayed hold.")
+    } catch EntitlerError.usageReplayed {}
+  }
 }
 
 final class Clock: @unchecked Sendable {
