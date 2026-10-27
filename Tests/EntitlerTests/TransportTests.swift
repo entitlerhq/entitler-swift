@@ -244,4 +244,17 @@ import Testing
         "/v1/customers/ada/entitlements/priority_support",
       ])
   }
+
+  @Test func aWriteWhoseAnswerCannotBeReadStillDropsTheKeptAnswers() async throws {
+    let kept = Answer(headers: ["Cache-Control": "private, max-age=600"], body: switchCheck)
+    let api = FakeAPI([kept, Answer(body: "{}"), kept])
+    let ada = try api.server().customer("ada")
+    _ = try await ada.check("priority_support")
+    await #expect(throws: EntitlerError.self) {
+      try await ada.recordUsage(of: "ai_credits", amount: 1, idempotencyKey: "m-1")
+    }
+    _ = try await ada.check("priority_support")
+
+    #expect(api.requests.count == 3)
+  }
 }

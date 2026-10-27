@@ -268,11 +268,12 @@ final class Core: Sendable, CustomReflectable {
     return try await guarded { [self] in
       let auth = try await authorise(request)
       let response = try await send(request, auth: auth)
-      let answer = try decoded(response, decode, idempotencyKey: request.idempotencyKey)
       if request.method != "GET", let cache {
         await renewGeneration(request, credential: (response.refreshed ?? auth).credential, cache)
       }
-      return (answer, response.retried)
+      return (
+        try decoded(response, decode, idempotencyKey: request.idempotencyKey), response.retried
+      )
     }
   }
 
