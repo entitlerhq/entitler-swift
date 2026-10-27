@@ -29,9 +29,10 @@ public enum FakeValue: Sendable, Hashable, ExpressibleByBooleanLiteral,
 
 /// A write a ``FakeCustomer`` received, for assertions.
 public struct FakeWrite: Sendable, Hashable {
-  /// What it was: `recordUsage`, `holdUsage`, `settleUsage` or `releaseUsage`.
+  /// What it was: `recordUsage`, `holdUsage`, `settleUsage`, `releaseUsage` or `cancelUsage`.
   public let method: String
-  /// The feature's key, or the hold's id for `settleUsage` and `releaseUsage`.
+  /// The feature's key, the hold's id for `settleUsage` and `releaseUsage`, or the report's id
+  /// for `cancelUsage`.
   public let target: String
   /// The amount it sent, or `nil` for `releaseUsage`.
   public let amount: Int64?
@@ -51,7 +52,9 @@ public struct FakeWrite: Sendable, Hashable {
 /// - Checks and entitlement lists answer from the values. A key it doesn't hold is refused with
 ///   ``Reason/featureNotFound``, so `isEntitled` answers its default.
 /// - Usage moves the meters as Entitler does: a gated report or a hold that doesn't fit is
-///   refused, holds settle and release, and a repeated idempotency key replays the first answer.
+///   refused, holds settle, release and expire, reports can be cancelled, and a repeated
+///   idempotency key replays the first answer, or answers `IDEMPOTENCY_KEY_REUSED` for a different
+///   request.
 /// - Every other call is refused with `Unimplemented`.
 public final class FakeCustomer: Sendable {
   /// The customer, as the server client names it.
@@ -120,7 +123,8 @@ struct FakeState {
   var used: [String: Int64]
   var held: [String: Int64] = [:]
   var holds: [String: Hold] = [:]
-  var replies: [String: [String: Any]] = [:]
+  var reports: [String: (feature: String, amount: Int64, cancelled: Bool)] = [:]
+  var replies: [String: (request: Data, reply: [String: Any])] = [:]
   var writes: [FakeWrite] = []
 
   init(id: String, values: [String: FakeValue], clock: @escaping @Sendable () -> Date) {
@@ -163,6 +167,8 @@ struct FakeState {
       return close(String(rest[2].dropLast(":settle".count)), settling: int(body["amount"]))
     case ("DELETE", 3, "usage") where rest[1] == "holds":
       return close(rest[2], settling: nil)
+    case ("POST", 2, "usage") where rest[1].hasSuffix(":cancel"):
+      return cancel(String(rest[1].dropLast(":cancel".count)))
     default:
       return refused(501, "Unimplemented", "FAKE_UNSUPPORTED")
     }
@@ -172,7 +178,12 @@ struct FakeState {
     _ body: [String: Any], _ method: String, _ write: (inout FakeState) -> (Int, [String: Any])
   ) -> (Int, Data) {
     let key = method + "\n" + (body["idempotencyKey"] as? String ?? "")
-    if var reply = replies[key] {
+    let request =
+      (try? JSONSerialization.data(withJSONObject: body, options: .sortedKeys)) ?? Data()
+    if let kept = replies[key], kept.request != request {
+      return refused(400, "FailedPrecondition", "IDEMPOTENCY_KEY_REUSED")
+    }
+    if var reply = replies[key]?.reply {
       var usage = reply["usage"] as? [String: Any] ?? [:]
       usage["replayed"] = true
       if let hold = usage["holdId"] as? String {
@@ -183,7 +194,7 @@ struct FakeState {
       return (200, json(["tracked": reply]))
     }
     let (status, reply) = write(&self)
-    if status == 200 { replies[key] = reply }
+    if status == 200 { replies[key] = (request, reply) }
     return (status, json(status == 200 ? ["tracked": reply] : reply))
   }
 
@@ -203,7 +214,13 @@ struct FakeState {
       return (200, tracked(feature, outcome: "REFUSED", amount: amount, refusal: "OVER_ALLOWANCE"))
     }
     used[feature, default: 0] += amount
-    return (200, tracked(feature, outcome: "RECORDED", amount: amount, change: amount, mode: mode))
+    let id = "us_\(writes.count)"
+    reports[id] = (feature, amount, false)
+    return (
+      200,
+      tracked(
+        feature, outcome: "RECORDED", amount: amount, change: amount, mode: mode, usage: id)
+    )
   }
 
   private mutating func hold(_ body: [String: Any]) -> (Int, [String: Any]) {
@@ -263,25 +280,42 @@ struct FakeState {
     )
   }
 
+  private mutating func cancel(_ id: String) -> (Int, Data) {
+    writes.append(FakeWrite(method: "cancelUsage", target: id, amount: nil, idempotencyKey: nil))
+    guard let report = reports[id] else { return refused(404, "NotFound", "USAGE_NOT_FOUND") }
+    if !report.cancelled { used[report.feature, default: 0] -= report.amount }
+    reports[id]?.cancelled = true
+    var answer = tracked(
+      report.feature, outcome: "CANCELLED", amount: report.amount,
+      change: report.cancelled ? 0 : -report.amount, usage: id)
+    if report.cancelled, var usage = answer["usage"] as? [String: Any] {
+      usage["replayed"] = true
+      answer["usage"] = usage
+    }
+    return (200, json(["tracked": answer]))
+  }
+
   private func meterLimit(_ feature: String) -> Int64?? {
     switch values[feature] {
-    case .metered(let limit, _): .some(limit)
+    case .metered(let limit, _) where limit > 0: .some(limit)
     case .unlimitedMeter: .some(nil)
     default: nil
     }
   }
 
   private func refusedObject(_ feature: String) -> (Int, [String: Any]) {
-    guard values[feature] != nil else {
-      return (404, errorObject("NotFound", "FEATURE_NOT_FOUND"))
+    switch values[feature] {
+    case nil: return (404, errorObject("NotFound", "FEATURE_NOT_FOUND"))
+    case .metered:
+      return (200, tracked(feature, outcome: "REFUSED", amount: 0, refusal: "NOT_ENTITLED"))
+    default: return (400, errorObject("FailedPrecondition", "USAGE_FEATURE_NOT_METERED"))
     }
-    return (200, tracked(feature, outcome: "REFUSED", amount: 0, refusal: "NOT_ENTITLED"))
   }
 
   private func tracked(
     _ feature: String, outcome: String, amount: Int64, change: Int64 = 0,
     refusal: String? = nil, hold: String? = nil, expiresAtMs: Int64? = nil,
-    mode: String = "USAGE_MODE_GATE"
+    mode: String = "USAGE_MODE_GATE", usage id: String? = nil
   ) -> [String: Any] {
     var usage: [String: Any] = [
       "outcome": "USAGE_OUTCOME_\(outcome)", "mode": mode, "amount": amount,
@@ -290,6 +324,7 @@ struct FakeState {
     ]
     usage["refusal"] = refusal.map { "USAGE_REFUSAL_\($0)" }
     usage["holdId"] = hold
+    usage["usageId"] = id
     usage["expiresAtMs"] = expiresAtMs
     return context(["entitlement": entitlement(feature), "usage": usage])
   }

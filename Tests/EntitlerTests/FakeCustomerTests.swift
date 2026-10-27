@@ -118,9 +118,51 @@ import Testing
 
     #expect(Set([first.holdID, second.holdID, third.holdID]).count == 3)
     do {
-      _ = try await fake.customer.startHold(of: aiCredits, amount: 1, idempotencyKey: "h-1")
+      _ = try await fake.customer.startHold(
+        of: aiCredits, amount: 1, idempotencyKey: "h-1", ttlSeconds: 60)
       Issue.record("Expected a replayed hold.")
     } catch EntitlerError.usageReplayed {}
+  }
+
+  @Test func aKeyReusedForAnotherRequestIsRefused() async throws {
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 100)])
+    _ = try await fake.customer.recordUsage(of: aiCredits, amount: 3, idempotencyKey: "m-1")
+    do {
+      _ = try await fake.customer.recordUsage(of: aiCredits, amount: 4, idempotencyKey: "m-1")
+      Issue.record("Expected a reused key.")
+    } catch EntitlerError.api(let error) {
+      #expect(error.reason?.rawValue == "IDEMPOTENCY_KEY_REUSED")
+    }
+    #expect(fake.used("ai_credits") == 3)
+  }
+
+  @Test func cancellingAReportGivesItBackOnce() async throws {
+    let fake = try FakeCustomer(["ai_credits": .metered(limit: 100, used: 10)])
+    let report = try await fake.customer.recordUsage(
+      of: aiCredits, amount: 5, idempotencyKey: "m-1")
+    let id = try #require(report.id)
+    let cancelled = try await fake.customer.cancelUsage(id)
+    let again = try await fake.customer.cancelUsage(id)
+
+    #expect(cancelled.outcome.rawValue == "cancelled")
+    #expect(cancelled.meterChange == -5)
+    #expect(again.replayed)
+    #expect(again.meterChange == 0)
+    #expect(fake.used("ai_credits") == 10)
+    #expect(fake.writes.map(\.method) == ["recordUsage", "cancelUsage", "cancelUsage"])
+  }
+
+  @Test func usageOfAFeatureThatIsNotMeteredOrHasNoAllowanceIsRefused() async throws {
+    let fake = try FakeCustomer(["export_pdf": true, "ai_credits": .metered(limit: 0)])
+    let refused = try await fake.customer.recordUsage(
+      of: aiCredits, amount: 1, idempotencyKey: "m-1")
+    do {
+      _ = try await fake.customer.recordUsage(of: "export_pdf", amount: 1, idempotencyKey: "m-2")
+      Issue.record("Expected a feature that isn't metered.")
+    } catch EntitlerError.api(let error) {
+      #expect(error.reason?.rawValue == "USAGE_FEATURE_NOT_METERED")
+    }
+    #expect(refused.refusal == .notEntitled)
   }
 }
 
